@@ -2,9 +2,11 @@ import { searchWeb } from "./search.service.js";
 import { crawlSite } from "./crawler.service.js";
 import { extractLead } from "./ai.service.js";
 import { LeadModel } from "../models/lead.model.js";
+import { env } from "../config/env.js";
 import { getDomain, normalizeUrl } from "../utils/url.utils.js";
 import type { SearchResult } from "../types/search.type.js";
 import type { LeadCandidate } from "../types/lead.type.js";
+import type { AiModel } from "../config/env.js";
 
 interface GenerateOptions {
   keyword: string;
@@ -12,15 +14,19 @@ interface GenerateOptions {
   limit?: number;
   /** true = ดึงใหม่แม้ domain จะมีใน DB แล้ว, false (default) = ข้ามไป */
   refresh?: boolean;
+  /** โมเดล AI ที่ใช้รอบนี้ — ไม่ส่งมา = ใช้ค่า default จาก env */
+  model?: AiModel;
 }
 
 /**
  * ขั้นตอน search -> crawl -> extract เท่านั้น **ไม่บันทึกลง DB**
  * ผลลัพธ์ที่ได้เอาไปให้หน้าบ้านตรวจ/แก้ แล้วส่งกลับมาที่ confirmLeads()
  */
-export async function generateLeads({ keyword, location, limit = 5, refresh = false }: GenerateOptions) {
+export async function generateLeads({ keyword, location, limit = 5, refresh = false, model }: GenerateOptions) {
   const targets = uniqueByDomain(await searchWeb(keyword, location)).slice(0, limit);
   const industry = keyword.trim();
+  // env.aiModel เป็น string อิสระ (AI_MODEL ใน .env) จึงยุบเป็น string ตรงนี้ ไม่ใช่ AiModel
+  const aiModel: string = model ?? env.aiModel;
 
   const leads: LeadCandidate[] = [];
   const skipped = [];
@@ -41,7 +47,7 @@ export async function generateLeads({ keyword, location, limit = 5, refresh = fa
       const pages = await crawlSite(result.url);
       const text = pages.map((page) => page.text).join("\n\n");
       const links = pages.flatMap((page) => page.links);
-      const extracted = await extractLead(text, result.url, links);
+      const extracted = await extractLead(text, result.url, links, aiModel);
 
       leads.push({
         companyName: extracted.companyName ?? result.title,
@@ -58,7 +64,8 @@ export async function generateLeads({ keyword, location, limit = 5, refresh = fa
     }
   }
 
-  return { leads, skipped, failed };
+  // คืน aiModel ไปด้วยเพื่อให้หน้าบ้านแสดงได้ว่าผลรอบนี้มาจากโมเดลไหน
+  return { model: aiModel, leads, skipped, failed };
 }
 
 /** บันทึกผลที่หน้าบ้านตรวจ/แก้แล้วลง DB ทีเดียว — upsert ตาม domain */

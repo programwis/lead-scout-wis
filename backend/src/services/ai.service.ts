@@ -17,7 +17,9 @@ const maxContactLinks = 20;
  */
 const modelsWithoutEffort = ["claude-haiku-4-5", "claude-sonnet-4-5"];
 
-const supportsEffort = !modelsWithoutEffort.some((model) => env.aiModel.startsWith(model));
+function supportsEffort(model: string) {
+  return !modelsWithoutEffort.some((name) => model.startsWith(name));
+}
 
 const extractedLeadSchema = z.object({
   companyName: z.string().nullable(),
@@ -46,7 +48,13 @@ const systemPrompt = [
   "over personal or webmaster addresses."
 ].join(" ");
 
-export async function extractLead(text: string, website: string, links: string[] = []): Promise<ExtractedLead> {
+/** `model` ไม่ส่งมา = ใช้ค่า default จาก env — ผู้เรียกส่งมาได้เพื่อสลับโมเดลเป็นราย request */
+export async function extractLead(
+  text: string,
+  website: string,
+  links: string[] = [],
+  model: string = env.aiModel
+): Promise<ExtractedLead> {
   const content = cleanText(text).slice(0, maxTextLength);
   const contactLinks = findContactLinks(links);
 
@@ -57,11 +65,11 @@ export async function extractLead(text: string, website: string, links: string[]
   ].join("\n");
 
   const response = await client.messages.parse({
-    model: env.aiModel,
+    model,
     max_tokens: 16000,
     system: systemPrompt,
     output_config: {
-      ...(supportsEffort ? { effort: "low" as const } : {}),
+      ...(supportsEffort(model) ? { effort: "low" as const } : {}),
       format: zodOutputFormat(extractedLeadSchema)
     },
     messages: [{ role: "user", content: prompt }]

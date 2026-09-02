@@ -6,5 +6,6 @@ export async function leadRoutes(app: FastifyInstance) {
   app.post("/crawl", LeadController.crawl);
   app.post("/generate", LeadController.generate);
   app.post("/confirm", LeadController.confirm);
+  app.get("/models", LeadController.models);
   app.get("/", LeadController.list);
 }

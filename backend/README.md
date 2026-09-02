@@ -55,7 +55,7 @@ keyword + location
 | บริการ | จำเป็น | ราคา | ใช้ตอนไหน |
 |---|---|---|---|
 | **Serper** ([serper.dev](https://serper.dev)) | ✅ | ฟรี 2,500 queries แรก ไม่ต้องผูกบัตร หลังจากนั้นดูแผนราคาในเว็บ | 1 query ต่อการเรียก `/generate` หรือ `/search` 1 ครั้ง |
-| **Anthropic API** ([console.anthropic.com](https://console.anthropic.com)) | ✅ | จ่ายตามใช้จริง เติมเงินล่วงหน้า — ขึ้นกับโมเดลที่เลือก — default `claude-haiku-4-5` คิด $1 ต่อ 1 ล้าน input token และ $5 ต่อ 1 ล้าน output token (เทียบรุ่นอื่นในหัวข้อ [การเปลี่ยนโมเดล AI](#การเปลี่ยนโมเดล-ai)) | 1 ครั้งต่อ 1 เว็บที่ crawl |
+| **Anthropic API** ([console.anthropic.com](https://console.anthropic.com)) | ✅ | จ่ายตามใช้จริง เติมเงินล่วงหน้า — ขึ้นกับโมเดลที่เลือก — default `claude-haiku-4-5` คิด $1 ต่อ 1 ล้าน input token และ $5 ต่อ 1 ล้าน output token (เทียบรุ่นอื่นในหัวข้อ [การเปลี่ยนโมเดล AI](#การเลือกโมเดล-ai)) | 1 ครั้งต่อ 1 เว็บที่ crawl |
 | **MongoDB** | ✅ | ติดตั้งบนเครื่องเอง = ฟรี / MongoDB Atlas มี free tier (M0, 512MB) พอสำหรับช่วงเริ่มต้น | ทุกครั้งที่บันทึก lead |
 | **Playwright** | - | ฟรี เป็น open source รันบนเครื่องเราเอง | ทุกครั้งที่ crawl |
 
@@ -77,26 +77,47 @@ keyword + location
 - ใช้ `POST /api/leads/search` (ฟรีจาก AI เพราะไม่เรียก AI เลย) เช็คก่อนว่า keyword นี้ได้เว็บที่ใช้ได้จริงไหม แล้วค่อยยิง `/generate`
 - ระบบ**ข้าม domain ที่มีใน DB อยู่แล้วโดยอัตโนมัติ** (ไม่ crawl ไม่เรียก AI) ยิง keyword เดิมซ้ำจึงแทบไม่เสียเงิน ถ้าอยากดึงข้อมูลใหม่ทับของเดิม ส่ง `refresh: true` มาด้วย
 - ระบบตั้ง `effort: "low"` ให้ AI อยู่แล้ว เพราะงานดึงข้อมูลไม่ต้องคิดซับซ้อน — ช่วยลดค่า output token ไปพอสมควร
+- **เลือกโมเดลเป็นราย request ได้** ส่ง `model` ไปกับ `/generate` — ใช้ตัวถูกเป็นค่าหลัก แล้วค่อยยิงตัวแพงเฉพาะ keyword ที่ผลออกมาไม่ดี ดูหัวข้อ [การเลือกโมเดล AI](#การเลือกโมเดล-ai)
 
 ---
 
-## การเปลี่ยนโมเดล AI
+## การเลือกโมเดล AI
 
-ระบบออกแบบให้สลับโมเดลได้ง่าย ทำได้ 2 ทาง เลือกทางไหนก็ได้
+เลือกได้ 3 ระดับ ตัวบนทับตัวล่างเสมอ
 
-**ทาง A — แก้ในโค้ด** (เปลี่ยนถาวรทั้งโปรเจกต์) ที่ [`src/config/env.ts`](src/config/env.ts) บรรทัดเดียว:
+**1. ส่งมาในแต่ละ request** (ยืดหยุ่นสุด — คนละคำค้นใช้คนละโมเดลได้ ไม่ต้อง restart):
 
-```ts
-const defaultAiModel = "claude-haiku-4-5";   // ← เปลี่ยนตรงนี้
+```bash
+curl -X POST http://localhost:4000/api/leads/generate \
+  -H "Content-Type: application/json" \
+  -d '{ "keyword": "โรงงานผลิตอาหาร", "limit": 3, "model": "claude-sonnet-5" }'
 ```
 
-**ทาง B — แก้ใน `.env`** (เปลี่ยนเฉพาะเครื่องนี้ ไม่ต้องแตะโค้ด ทับค่าใน `env.ts` เสมอ):
+รับเฉพาะชื่อที่อยู่ในลิสต์ (ดู [`GET /api/leads/models`](#get-apileadsmodels)) ส่งชื่อมั่วมาจะได้ `400` ตั้งแต่ต้น
+**ก่อน**จะเริ่ม crawl — ไม่ปล่อยให้ไปพังที่ Anthropic ตอนรอมา 2 นาทีแล้ว
+
+> หน้าบ้านควรยิง `GET /api/leads/models` มาทำเป็น dropdown แล้วให้ผู้ใช้เลือกก่อนกด generate
+> ไม่ต้อง hardcode ชื่อ/ราคาไว้ฝั่งหน้าบ้าน เพิ่มโมเดลใหม่ทีหลังหน้าบ้านจะเห็นเอง
+
+**2. ตั้ง default ของ server ที่ `.env`** (ใช้เมื่อ request ไม่ได้ส่ง `model` มา):
 
 ```bash
 AI_MODEL=claude-opus-5
 ```
 
-เปลี่ยนแล้ว restart server พอ ไม่ต้องแก้ไฟล์อื่นเลย — `ai.service.ts` อ่านค่าจาก `env.aiModel` ที่เดียว
+ช่องนี้ใส่ชื่อโมเดลอะไรก็ได้ **ไม่จำกัดแค่ 3 ตัวในลิสต์** (เช่นอยากลองรุ่นใหม่ที่ยังไม่ได้เพิ่มในโค้ด)
+ลิสต์คุมเฉพาะค่าที่รับจาก request เท่านั้น
+
+**3. แก้ default ในโค้ด** ที่ [`src/config/env.ts`](src/config/env.ts) บรรทัดเดียว:
+
+```ts
+const defaultAiModel: AiModel = "claude-haiku-4-5";   // ← เปลี่ยนตรงนี้
+```
+
+### เพิ่ม / ลบโมเดลในลิสต์ที่เลือกได้
+
+แก้ที่ `aiModels` หัวไฟล์ [`src/config/env.ts`](src/config/env.ts) ที่เดียว — `GET /api/leads/models`
+กับ validation ของ `/generate` อ่านจากตัวนี้ทั้งคู่ ถ้าเพิ่มโมเดลใหม่อย่าลืมเช็คเรื่อง `effort` ข้างล่างด้วย
 
 ### เลือกโมเดลไหนดี
 
@@ -115,7 +136,7 @@ AI_MODEL=claude-opus-5
 - `claude-haiku-4-5`, `claude-sonnet-4-5` → **ไม่รองรับ** ถ้าส่งไปจะได้ error `400 This model does not support the effort parameter.`
 - `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-x` → รองรับ
 
-`ai.service.ts` เช็คให้เองแล้วว่าโมเดลที่ตั้งไว้รองรับหรือไม่ ถ้ารองรับจะส่ง `effort: "low"` ไปด้วยเพื่อประหยัด ถ้าไม่รองรับก็ไม่ส่ง — **สลับโมเดลไปมาได้เลยโดยไม่เจอ error นี้**
+`ai.service.ts` เช็คให้เองทุกครั้งที่เรียก ว่าโมเดลของรอบนั้นรองรับหรือไม่ ถ้ารองรับจะส่ง `effort: "low"` ไปด้วยเพื่อประหยัด ถ้าไม่รองรับก็ไม่ส่ง — **สลับโมเดลไปมาได้เลยโดยไม่เจอ error นี้** รวมถึงตอนสลับเป็นราย request ด้วย
 
 ถ้าในอนาคตเจอโมเดลใหม่ที่ไม่รองรับ `effort` เพิ่มชื่อลงในลิสต์ `modelsWithoutEffort` ที่หัวไฟล์ `ai.service.ts` ได้เลย
 
@@ -166,7 +187,7 @@ cp .env.example .env              # แล้วใส่ค่า key
 | `MONGO_URI` | - | `mongodb://127.0.0.1:27017/leadscout` | connection string |
 | `SERPER_API_KEY` | ✅ | - | จาก serper.dev |
 | `ANTHROPIC_API_KEY` | ✅ | - | จาก console.anthropic.com |
-| `AI_MODEL` | - | `claude-haiku-4-5` | โมเดลที่ใช้ดึงข้อมูล ดูหัวข้อ [การเปลี่ยนโมเดล AI](#การเปลี่ยนโมเดล-ai) |
+| `AI_MODEL` | - | `claude-haiku-4-5` | โมเดลที่ใช้ดึงข้อมูล ดูหัวข้อ [การเปลี่ยนโมเดล AI](#การเลือกโมเดล-ai) |
 
 ### การรัน
 
@@ -190,6 +211,7 @@ base URL: `http://localhost:4000`
 | `POST` | `/api/leads/search` | ขั้น 1–2 อย่างเดียว (ไม่ save) | - |
 | `POST` | `/api/leads/crawl` | ขั้น 3 กับ 1 หน้า (ไม่ save) | - |
 | `GET` | `/api/leads` | ดู lead ที่บันทึกไว้ | - |
+| `GET` | `/api/leads/models` | รายชื่อโมเดล AI ที่เลือกได้ (ไว้ทำ dropdown) | - |
 
 ### POST /api/leads/generate
 
@@ -198,7 +220,7 @@ base URL: `http://localhost:4000`
 ```bash
 curl -X POST http://localhost:4000/api/leads/generate \
   -H "Content-Type: application/json" \
-  -d '{ "keyword": "โรงงานผลิตอาหาร", "location": "สมุทรปราการ", "limit": 5 }'
+  -d '{ "keyword": "โรงงานผลิตอาหาร", "location": "สมุทรปราการ", "limit": 5, "model": "claude-haiku-4-5" }'
 ```
 
 | field | type | จำเป็น | default |
@@ -207,10 +229,12 @@ curl -X POST http://localhost:4000/api/leads/generate \
 | `location` | string | - | - |
 | `limit` | number | - | `5` (จำนวนเว็บที่จะ crawl) |
 | `refresh` | boolean | - | `false` — `true` = crawl ใหม่ทับของเดิม ไม่ข้าม domain ที่มีใน DB |
+| `model` | string | - | โมเดล AI ที่ใช้รอบนี้ ไม่ส่ง = ใช้ค่า default ของ server · รับเฉพาะค่าใน [`GET /api/leads/models`](#get-apileadsmodels) ส่งค่าอื่นได้ `400` (ดู [การเลือกโมเดล AI](#การเลือกโมเดล-ai)) |
 
 ```jsonc
 {
   "success": true,
+  "model": "claude-haiku-4-5",   // โมเดลที่ใช้จริงในรอบนี้
   "leads": [
     {
       // ยังไม่มี _id เพราะยังไม่ได้บันทึก
@@ -238,6 +262,7 @@ curl -X POST http://localhost:4000/api/leads/generate \
 | `leads` | ผลที่ crawl + ให้ AI อ่านในรอบนี้ — **ยังไม่บันทึก** ช่องที่หาไม่เจอจะเป็น `null` (ไม่ใช่หายไป) เพื่อให้ทำฟอร์มง่าย |
 | `skipped` | domain ที่มีใน DB อยู่แล้ว → ข้าม ไม่ crawl ไม่เสียค่า AI ส่งข้อมูลเดิมกลับมาให้ดู |
 | `failed` | เว็บที่พัง พร้อมสาเหตุ — ไม่ทำให้ทั้ง request ล้ม |
+| `model` | โมเดลที่ใช้จริงในรอบนี้ (ตามที่ส่งมา หรือค่า default ถ้าไม่ได้ส่ง) — เอาไปแสดงคู่กับผลลัพธ์ได้ |
 
 ถ้ายิง keyword เดิมซ้ำ ส่วนใหญ่จะเห็น `leads: []` กับ `skipped` เต็มไปหมด แปลว่าปกติ — ระบบไม่ทำงานซ้ำให้เปลืองเงิน ถ้าต้องการข้อมูลใหม่จริง ๆ ส่ง `refresh: true`
 
@@ -363,6 +388,35 @@ curl "http://localhost:4000/api/leads?industry=โรงงานผลิตอ
 
 เรียงจากใหม่ไปเก่า (`createdAt` desc)
 
+### GET /api/leads/models
+
+รายชื่อโมเดลที่ `/generate` ยอมรับ พร้อมราคา — ไว้ให้หน้าบ้านทำ dropdown โดยไม่ต้อง hardcode
+
+```bash
+curl http://localhost:4000/api/leads/models
+```
+
+```jsonc
+{
+  "success": true,
+  "defaultModel": "claude-haiku-4-5",   // ค่าที่ใช้ถ้า /generate ไม่ส่ง model มา
+  "models": [
+    {
+      "name": "claude-haiku-4-5",       // ← ค่าที่ส่งเข้า /generate
+      "label": "Haiku 4.5",             // ← เอาไปโชว์ใน dropdown
+      "inputPricePerMTok": 1,
+      "outputPricePerMTok": 5,
+      "note": "ถูกสุด เพียงพอกับงานดึงข้อมูลติดต่อทั่วไป"
+    }
+  ]
+}
+```
+
+> ⚠️ ถ้าตั้ง `AI_MODEL` ใน `.env` เป็นชื่อที่ไม่มีในลิสต์ `defaultModel` จะไม่ตรงกับ `models` ตัวไหนเลย
+> (ตั้งใจให้เป็นแบบนั้น — `.env` ใส่อะไรก็ได้) หน้าบ้านควรเผื่อกรณีนี้ไว้ อย่า assume ว่าหาเจอเสมอ
+
+---
+
 ### Error response
 
 ทุก endpoint ที่ validate ไม่ผ่านจะได้ HTTP `400`:
@@ -408,7 +462,7 @@ src/
 
 **การหาอีเมล** — ระบบหาจาก 3 ทาง: อีเมลที่พิมพ์อยู่บนหน้าเว็บตรง ๆ, อีเมลที่ซ่อนในลิงก์ `mailto:` (ดึงมาจาก href ไม่ใช่จากข้อความ), และอีเมลที่เขียนกันบอทแบบ `info (at) example (dot) com` ซึ่ง AI จะแปลงกลับให้เป็นรูปแบบปกติ เบอร์โทรก็ดึงจากลิงก์ `tel:` ด้วยวิธีเดียวกัน ถ้าเว็บไม่มีอีเมลจริง ๆ จะได้ `null` — ไม่มีการเดาจากชื่อโดเมน ถ้ามีหลายอีเมลจะเลือกอันที่เป็นช่องทางหลักของบริษัท (info@, contact@, sales@) ก่อนอีเมลส่วนตัว
 
-**AI** — ใช้ structured output (Zod schema) จึงไม่ต้อง parse JSON เอง และไม่มีปัญหา AI ตอบผิดฟอร์แมต ข้อมูลที่ไม่มีในหน้าเว็บจะได้ `null` โมเดลตั้งค่าที่ `src/config/env.ts` หรือ `AI_MODEL` ใน `.env`
+**AI** — ใช้ structured output (Zod schema) จึงไม่ต้อง parse JSON เอง และไม่มีปัญหา AI ตอบผิดฟอร์แมต ข้อมูลที่ไม่มีในหน้าเว็บจะได้ `null` เลือกโมเดลได้ 3 ระดับ: ฟิลด์ `model` ใน `/generate` → `AI_MODEL` ใน `.env` → `src/config/env.ts`
 
 ## ถ้าจะขยายต่อ
 

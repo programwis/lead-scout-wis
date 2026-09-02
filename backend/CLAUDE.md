@@ -35,7 +35,7 @@ layer ที่ทำหน้าที่ forward call เฉย ๆ, โฟล
 
 | ไฟล์ | หน้าที่ | ห้ามมีอะไร |
 |---|---|---|
-| `config/env.ts` | รวม `process.env` + ค่า default ของโมเดล AI | logic อื่น |
+| `config/env.ts` | รวม `process.env` + ค่า default ของโมเดล AI + `aiModels` (ลิสต์โมเดลที่ `/generate` เลือกได้) | logic อื่น |
 | `routes/lead.routes.ts` | ผูก path กับ controller | logic |
 | `controllers/lead.controller.ts` | อ่าน body/query, validate, เรียก service | business logic |
 | `services/lead.service.ts` | คุมโฟลว์ generate / confirm / list | รายละเอียดของ Serper, Playwright, Claude |
@@ -49,6 +49,10 @@ layer ที่ทำหน้าที่ forward call เฉย ๆ, โฟล
 ## โฟลว์ที่ต้องเข้าใจก่อนแก้ lead.service.ts
 
 - `generateLeads()` = **อ่าน DB อย่างเดียว** (เช็คว่า domain มีแล้วไหมเพื่อข้าม ไม่ให้เปลืองค่า AI) แล้วคืน `LeadCandidate[]` ที่ยังไม่บันทึก
+- **โมเดล AI เลือกได้เป็นราย request** — `model` ใน body ของ `/generate` > `AI_MODEL` ใน `.env` > `defaultAiModel`
+  controller validate ว่าอยู่ใน `aiModels` ก่อน (ผิด = 400 ทันที ไม่ปล่อยไปพังที่ Anthropic กลางทาง)
+  แล้ว `generateLeads()` ส่งต่อให้ `extractLead(..., model)` และคืนชื่อโมเดลที่ใช้จริงกลับไปในผลลัพธ์ด้วย
+  `GET /api/leads/models` คืนลิสต์นี้ให้หน้าบ้านทำ dropdown
 - `confirmLeads()` = **เขียน DB อย่างเดียว** upsert ตาม `domain` ไม่ crawl ไม่เรียก AI
 - ระหว่าง 2 ขั้นนี้ หน้าบ้านถือข้อมูลไว้เอง backend ไม่เก็บ draft
 
@@ -66,8 +70,11 @@ layer ที่ทำหน้าที่ forward call เฉย ๆ, โฟล
 ## กับดักที่เคยทำให้พังมาแล้ว — อย่าทำซ้ำ
 
 1. **`output_config.effort`** — `claude-haiku-4-5` และ `claude-sonnet-4-5` ไม่รองรับ ส่งไปจะได้
-   `400 This model does not support the effort parameter.` `ai.service.ts` มีลิสต์ `modelsWithoutEffort`
-   คอยเช็คให้แล้ว ถ้าเพิ่มโมเดลใหม่ที่ไม่รองรับ ให้เติมชื่อในลิสต์นั้น
+   `400 This model does not support the effort parameter.` `ai.service.ts` มีฟังก์ชัน `supportsEffort()`
+   เช็คให้ทุกครั้งที่เรียก (ไม่ใช่ครั้งเดียวตอน import — เพราะโมเดลเปลี่ยนได้ทุก request)
+   ถ้าเพิ่มโมเดลใหม่ที่ไม่รองรับ ให้เติมชื่อในลิสต์ `modelsWithoutEffort`
+   **ลิสต์นี้แยกจาก `aiModels` ใน `config/env.ts` โดยตั้งใจ** เพราะ `AI_MODEL` ใน `.env` ใส่ชื่ออะไรก็ได้
+   ที่ไม่อยู่ใน `aiModels` — `supportsEffort()` จึงต้องรับ string อิสระได้
 2. **mongoose ตัด key ที่เป็น `undefined` ออกจาก `$set` อัตโนมัติ** — โปรเจกต์นี้**ตั้งใจ**ใช้พฤติกรรมนี้
    ผ่านฟังก์ชัน `optional()` (ค่าว่าง → `undefined`) เพื่อให้ "เว้นว่าง = ไม่ทับของเดิม"
    **ห้ามเปลี่ยนไปส่ง `null`** เพราะ `null` จะเขียนทับข้อมูลเดิมให้หาย
@@ -92,7 +99,7 @@ npx tsc --noEmit                       # ตรวจ type ทั้งโปร
 
 ## อย่าทำ
 
-- อย่าเปลี่ยนโมเดล AI เองโดยไม่บอกผู้ใช้ (ตั้งที่ `config/env.ts` หรือ `AI_MODEL` ใน `.env`)
+- อย่าเปลี่ยนโมเดล AI เองโดยไม่บอกผู้ใช้ (ตั้งที่ `aiModels` / `defaultAiModel` ใน `config/env.ts` หรือ `AI_MODEL` ใน `.env`)
 - อย่า commit / push ถ้าผู้ใช้ไม่ได้สั่ง
 - อย่าเอาค่าใน `.env` ไป log, hardcode, หรือส่งออกนอกโปรเจกต์
 - อย่าแก้ README แล้วปล่อยให้ตัวเลขราคา/ชื่อโมเดลไม่ตรงกับโค้ด — สองไฟล์นี้ต้องตรงกันเสมอ
