@@ -1,7 +1,8 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { searchWeb } from "../services/search.service.js";
 import { crawlWebsite } from "../services/crawler.service.js";
-import { generateLeads, listLeads } from "../services/lead.service.js";
+import { confirmLeads, generateLeads, listLeads } from "../services/lead.service.js";
+import type { LeadCandidate } from "../types/lead.type.js";
 
 interface SearchBody {
   keyword: string;
@@ -15,6 +16,10 @@ interface GenerateBody extends SearchBody {
 
 interface CrawlBody {
   url: string;
+}
+
+interface ConfirmBody {
+  leads: LeadCandidate[];
 }
 
 export class LeadController {
@@ -48,7 +53,21 @@ export class LeadController {
     return { success: true, leads, skipped, failed };
   }
 
-  static async list(request: FastifyRequest<{ Querystring: { limit?: number } }>) {
-    return { success: true, leads: await listLeads(request.query.limit) };
+  static async confirm(request: FastifyRequest<{ Body: ConfirmBody }>, reply: FastifyReply) {
+    const { leads } = request.body;
+
+    if (!Array.isArray(leads) || leads.length === 0) {
+      return reply.code(400).send({ success: false, message: "leads must be a non-empty array" });
+    }
+
+    const { saved, failed } = await confirmLeads(leads);
+
+    return { success: true, saved, failed };
+  }
+
+  static async list(request: FastifyRequest<{ Querystring: { limit?: number; industry?: string } }>) {
+    const { limit, industry } = request.query;
+
+    return { success: true, leads: await listLeads(limit, industry) };
   }
 }

@@ -4,7 +4,8 @@ import type { Lead } from "../types/lead.type.js";
 const leadSchema = new mongoose.Schema<Lead>(
   {
     companyName: { type: String, required: true },
-    industry: String,
+    industry: { type: String, index: true },
+    industryDetail: String,
     website: String,
     domain: { type: String, unique: true },
     phone: String,

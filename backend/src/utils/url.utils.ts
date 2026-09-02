@@ -6,14 +6,27 @@ const excludedDomains = new Set([
   "facebook.com",
   "instagram.com",
   "youtube.com",
-  "wikipedia.org",
   "linkedin.com",
-  "trustpilot.com",
-  "line.me",
   "tiktok.com",
   "x.com",
   "twitter.com",
-  "moph.go.th"
+  "line.me",
+  "wikipedia.org",
+  "trustpilot.com",
+  "dataforthai.com",
+  "companieshouse.gov.uk",
+  "crunchbase.com",
+  "zoominfo.com",
+  "dnb.com",
+  "opencorporates.com",
+  "kompass.com",
+  "thailandbusinessdirectory.com",
+  "yellowpages.co.th",
+  "moph.go.th",
+  "dbd.go.th",
+  "diw.go.th",
+  "rd.go.th",
+  "กรมพัฒนาธุรกิจการค้า.com"
 ]);
 
 export function isBusinessWebsite(url: string) {
