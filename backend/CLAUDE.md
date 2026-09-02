@@ -3,6 +3,7 @@
 ไฟล์นี้ครอบคลุม **backend เท่านั้น** (โฟลเดอร์นี้) — path ทั้งหมดข้างล่างอ้างอิงจากโฟลเดอร์นี้
 
 ระบบหา lead ธุรกิจ: keyword → Serper → กรองเว็บ → Playwright crawl → Claude ดึงข้อมูลติดต่อ → MongoDB
+**เป้าหมายคือ contact ที่ Sales ติดต่อได้จริง ไม่ใช่แค่หาเว็บบริษัทเจอ** — บริษัทที่ไม่มีเบอร์และอีเมลไม่นับเป็นผลงาน
 คู่มือฉบับคนอ่าน (โฟลว์/ราคา/ตัวอย่าง API) อยู่ที่ `README.md` ข้าง ๆ กัน
 ผู้ใช้สื่อสารภาษาไทย — ตอบภาษาไทย
 
@@ -39,16 +40,30 @@ layer ที่ทำหน้าที่ forward call เฉย ๆ, โฟล
 | `routes/lead.routes.ts` | ผูก path กับ controller | logic |
 | `controllers/lead.controller.ts` | อ่าน body/query, validate, เรียก service | business logic |
 | `services/lead.service.ts` | คุมโฟลว์ generate / confirm / list | รายละเอียดของ Serper, Playwright, Claude |
-| `services/search.service.ts` | Serper เท่านั้น | อย่างอื่น |
+| `services/search.service.ts` | Serper เท่านั้น (รวมการแบ่งหน้า — รับ `page`, คืน `{ results, hasMore }`) | อย่างอื่น |
 | `services/crawler.service.ts` | Playwright เท่านั้น | DB, AI |
 | `services/ai.service.ts` | Claude เท่านั้น (structured output ด้วย Zod) | Fastify, DB |
 | `models/lead.model.ts` | Mongoose schema + index | crawl, AI, HTTP |
-| `types/*.type.ts` | type ที่ใช้ร่วมกัน | - |
+| `types/*.type.ts` | type ที่ใช้ร่วมกัน (`progress.type.ts` = โครง progress ที่เตรียมไว้ ยังไม่มีใครใช้) | - |
 | `utils/{url,text}.utils.ts` | helper เล็ก ๆ | ทุกอย่างข้างบน |
 
 ## โฟลว์ที่ต้องเข้าใจก่อนแก้ lead.service.ts
 
 - `generateLeads()` = **อ่าน DB อย่างเดียว** (เช็คว่า domain มีแล้วไหมเพื่อข้าม ไม่ให้เปลืองค่า AI) แล้วคืน `LeadCandidate[]` ที่ยังไม่บันทึก
+- **`limit` = จำนวน lead ที่ *ติดต่อได้* ไม่ใช่จำนวนเว็บที่หยิบจากผลค้นหา** — ระหว่างทางเว็บหล่นได้ 4 ทาง
+  (โดนกรองทิ้ง / domain มีใน DB แล้ว / crawl ไม่ผ่าน / หา contact ไม่เจอ) `generateLeads()` จึงวนขอ
+  Serper หน้าถัดไปมาเติมจนครบ `limit` หรือชน `maxSearchPages` (5 หน้า — hard limit ห้ามถอด)
+  `seenDomains` ต้องอยู่นอกลูปหน้า ไม่งั้น domain ที่โผล่ซ้ำในหน้าถัด ๆ ไปจะโดน crawl ซ้ำ
+- **`contactStatus` backend คำนวณเอง ห้ามให้ AI ตอบ** — `contactable` (มีทั้งเบอร์และอีเมล) /
+  `partial` (มีอย่างเดียว) / `no_contact` (ไม่มีเลย) เป็นเงื่อนไขตายตัว ถ้าให้ AI ตัดสินจะไม่คงเส้นคงวา
+  เข้าโควตา `limit` เฉพาะ `contactable` + `partial` ส่วน `no_contact` ไปกอง `noContact` แยก
+- คืน `requested` / `searchedPages` / `summary` ไปด้วยให้หน้าบ้านรู้ว่าทำไมได้ไม่ครบ
+  `summary` นับเฉพาะบริษัทที่ crawl + extract สำเร็จ (`leads` + `noContact`) — `skipped` ไม่ผ่าน AI
+  และ `failed` ไม่มีข้อมูล จึงไม่มีอะไรให้นับ · `summary.withBoth` เท่ากับ `summary.contactable` เสมอ
+  ตามนิยาม เก็บทั้งคู่ตามที่ผู้ใช้กำหนดสเปกไว้ ไม่ใช่ของหลงเหลือ
+- **progress ยังไม่ได้ต่อกับอะไร** — `generateLeads()` รับ `onProgress?` แล้วยิง `GenerateProgress`
+  (`types/progress.type.ts`) ทุกครั้งที่ขยับ step ตอนนี้ controller ไม่ส่งมา จึงไม่มีอะไรทำงานเพิ่ม
+  **อย่าเพิ่ง**ทำ SSE/WebSocket หรือแปลง `/generate` เป็น job queue จนกว่าจะมีหน้าบ้านและผู้ใช้สั่ง
 - **โมเดล AI เลือกได้เป็นราย request** — `model` ใน body ของ `/generate` > `AI_MODEL` ใน `.env` > `defaultAiModel`
   controller validate ว่าอยู่ใน `aiModels` ก่อน (ผิด = 400 ทันที ไม่ปล่อยไปพังที่ Anthropic กลางทาง)
   แล้ว `generateLeads()` ส่งต่อให้ `extractLead(..., model)` และคืนชื่อโมเดลที่ใช้จริงกลับไปในผลลัพธ์ด้วย
@@ -83,6 +98,17 @@ layer ที่ทำหน้าที่ forward call เฉย ๆ, โฟล
 4. **`domain` มี unique index** — ห้ามบันทึก lead ที่ `domain` เป็น `null`/ว่าง จะชนกันเอง
 5. **AI ต้องไม่เดาข้อมูล** — system prompt สั่งให้คืน `null` เมื่อหาไม่เจอ อย่าแก้ให้ "เดาจากชื่อโดเมน"
    เพราะจะได้อีเมลที่ส่งไม่ถึงจริง
+6. **`hasMore` ของ `searchWeb()` ห้ามคิดจาก `results.length`** — หน้าที่โดนกรองทิ้งหมดก็ได้ `results` ว่าง
+   เหมือนหน้าที่ Serper ไม่มีผลแล้ว ถ้าใช้ `results.length` ตัดสิน ลูปจะหยุดไล่หน้าทั้งที่หน้าถัดไป
+   ยังมีเว็บบริษัทอยู่ (เจอจริง: หน้า 1 ของคำค้นไทยกรองเหลือ 6 จาก 10)
+7. **AI เอา `mailto:` มาใส่ช่อง `phone`** — เจอจริง: `phone = "mailto:pr@example.com, ..."` ทำให้ lead
+   ถูกตีเป็น `partial` ทั้งที่ไม่มีเบอร์ให้โทร `lead.service.ts` จึงล้างค่าก่อนคิด `contactStatus` ด้วย
+   `phoneOrNull()` (ต้องมีตัวเลขและห้ามมี `@`) กับ `emailOrNull()` (ต้องมี `@` ตัด `mailto:` ทิ้ง)
+   **อย่าเอาออก** ไม่งั้น `contactStatus` จะโกหก ซึ่งทำให้ `limit` นับผิดตามไปด้วย
+8. **ตัวกรอง `isBusinessWebsite()` กันขยะที่มากับการไล่หน้า** — พอบังคับให้ได้ครบ `limit` ระบบจะไล่ลงไป
+   หน้าลึก ๆ ที่มีแต่เว็บหางาน / บล็อกสำเร็จรูป / ราชการ ถ้าไม่กรองจะได้ครบจำนวนแต่เป็นขยะและเสียค่า AI ฟรี
+   (Blogspot คืน `your@email.com` ที่เป็น placeholder ของเทมเพลตมาแล้ว) เจอโดเมนขยะใหม่ให้เติมที่
+   `excludedDomains` / `excludedSuffixes` ใน `utils/url.utils.ts`
 
 ## วิธีตรวจงานเมื่อเครื่องไม่มี MongoDB
 

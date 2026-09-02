@@ -12,6 +12,16 @@ export interface Lead {
 }
 
 /**
+ * คุณภาพของข้อมูลติดต่อ — **backend คำนวณเองหลัง AI extract เสร็จ ห้ามให้ AI เป็นคนตัดสิน**
+ * เพราะ AI จะ "ตีความ" ไม่คงเส้นคงวา ทั้งที่กติกาเป็นเงื่อนไขตายตัวจาก phone/email ที่ได้มา
+ *
+ * - `contactable` — มีทั้งเบอร์และอีเมล
+ * - `partial` — มีอย่างใดอย่างหนึ่ง
+ * - `no_contact` — ไม่มีเลย ติดต่อไม่ได้ Sales เอาไปใช้ไม่ได้
+ */
+export type ContactStatus = "contactable" | "partial" | "no_contact";
+
+/**
  * ผลลัพธ์จาก /generate ที่ยัง "ไม่ได้บันทึก" — รอหน้าบ้านตรวจ/แก้ แล้วส่งกลับมาที่ /confirm
  * ฟิลด์ที่หาไม่เจอเป็น null (ไม่ใช่หายไป) เพื่อให้ฟอร์มฝั่งหน้าบ้านรู้ว่ามีช่องนี้แต่ยังว่าง
  */
@@ -24,6 +34,8 @@ export interface LeadCandidate {
   phone: string | null;
   email: string | null;
   address: string | null;
+  /** คำนวณจาก phone/email ข้างบน ไม่ได้มาจาก AI */
+  contactStatus: ContactStatus;
 }
 
 /** What the AI returns. Missing information is null, never invented. */

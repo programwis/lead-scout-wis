@@ -14,7 +14,8 @@ interface SearchBody {
 }
 
 interface GenerateBody extends SearchBody {
-  limit?: number;
+  /** string ด้วย เพราะฟอร์มฝั่งหน้าบ้านมักส่งค่าจาก <input> มาเป็น "3" ไม่ใช่ 3 */
+  limit?: number | string;
   refresh?: boolean;
   model?: AiModel;
 }
@@ -35,7 +36,9 @@ export class LeadController {
       return reply.code(400).send({ success: false, message: "Keyword is required" });
     }
 
-    return { success: true, results: await searchWeb(keyword, location) };
+    const { results } = await searchWeb(keyword, location);
+
+    return { success: true, results };
   }
 
   static async crawl(request: FastifyRequest<{ Body: CrawlBody }>, reply: FastifyReply) {
@@ -49,10 +52,19 @@ export class LeadController {
   }
 
   static async generate(request: FastifyRequest<{ Body: GenerateBody }>, reply: FastifyReply) {
-    const { model } = request.body;
+    // แยก limit ออกมาแปลงเป็นตัวเลขก่อน ที่เหลือส่งต่อให้ service ทั้งก้อน
+    const { limit: rawLimit, ...options } = request.body;
+    const { model } = options;
 
-    if (!request.body.keyword?.trim()) {
+    if (!options.keyword?.trim()) {
       return reply.code(400).send({ success: false, message: "Keyword is required" });
+    }
+
+    // limit = จำนวน lead ที่ต้องได้ ค่าเพี้ยน (0, ติดลบ, ทศนิยม) จะทำให้ลูปไล่หน้าค้นหาเพี้ยนตาม
+    const limit = rawLimit === undefined ? undefined : Number(rawLimit);
+
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+      return reply.code(400).send({ success: false, message: "limit ต้องเป็นจำนวนเต็มตั้งแต่ 1 ขึ้นไป" });
     }
 
     // กันพิมพ์ชื่อโมเดลผิดแล้วไปตาย 404 ที่ Anthropic ตอน crawl เสร็จไปครึ่งทางแล้ว
@@ -63,9 +75,9 @@ export class LeadController {
       });
     }
 
-    const { leads, skipped, failed, model: usedModel } = await generateLeads(request.body);
+    const result = await generateLeads(limit === undefined ? options : { ...options, limit });
 
-    return { success: true, model: usedModel, leads, skipped, failed };
+    return { success: true, ...result };
   }
 
   /** ให้หน้าบ้านเอาไปทำ dropdown เลือกโมเดล — ไม่ต้อง hardcode ชื่อ/ราคาซ้ำอีกฝั่ง */
