@@ -12,6 +12,38 @@ export interface Lead {
 }
 
 /**
+ * บทบาทของหน้าเว็บหนึ่ง ๆ ต่อ lead — **ไม่ใช่ blacklist**
+ * เว็บข่าว/กระทู้/wiki ไม่ได้ "ไร้ค่า" มันแค่ไม่ใช่ตัวธุรกิจ ใช้เป็นแหล่งอ้างอิงได้
+ * ตัวธุรกิจมาจาก Google Places เท่านั้น ตัวนี้จึงมีไว้จัดประเภท `references` และผลของ `/search`
+ */
+export type SourceType =
+  | "official_website"
+  | "social"
+  | "directory"
+  | "search"
+  | "government"
+  | "reference"
+  | "news"
+  | "other";
+
+/** แหล่งที่ใช้ยืนยัน/เสริมข้อมูลของ lead — เก็บ URL ไว้ให้ Sales ตามกลับไปดูได้ */
+export interface LeadReference {
+  type: SourceType;
+  url: string;
+  name?: string;
+}
+
+/**
+ * ผลการตรวจว่าธุรกิจอยู่ในพื้นที่ที่ขอจริงไหม — **backend ตรวจเอง ไม่ให้ AI เดา**
+ * ตรวจจากที่อยู่จริงของธุรกิจ (Google Places) ไม่ใช่จากการที่หน้าเว็บพูดถึงจังหวัดนั้น
+ *
+ * - `verified` — ที่อยู่ระบุพื้นที่ที่ขอ
+ * - `outside_location` — ที่อยู่ระบุจังหวัดอื่นชัดเจน → ตัดทิ้ง
+ * - `unknown` — หลักฐานไม่พอ → ไม่นับเป็น lead แต่คืนไปให้ตรวจเอง
+ */
+export type LocationStatus = "verified" | "outside_location" | "unknown";
+
+/**
  * คุณภาพของข้อมูลติดต่อ — **backend คำนวณเองหลัง AI extract เสร็จ ห้ามให้ AI เป็นคนตัดสิน**
  * เพราะ AI จะ "ตีความ" ไม่คงเส้นคงวา ทั้งที่กติกาเป็นเงื่อนไขตายตัวจาก phone/email ที่ได้มา
  *
@@ -36,6 +68,16 @@ export interface LeadCandidate {
   address: string | null;
   /** คำนวณจาก phone/email ข้างบน ไม่ได้มาจาก AI */
   contactStatus: ContactStatus;
+  /** ตรวจจากที่อยู่จริงเทียบกับ `location` ที่ขอมา */
+  locationStatus: LocationStatus;
+  /** เว็บทางการ + social/directory ที่ใช้ยืนยัน — `website` ข้างบนต้องเป็นเว็บทางการเสมอ ห้ามเอา reference มาแทน */
+  references: LeadReference[];
+  /** ฟิลด์ไหนมาจากแหล่งไหน — ไว้ให้ Sales รู้ว่าเบอร์นี้เอามาจาก Google Maps หรือจากเว็บบริษัท */
+  contactSources: {
+    phone?: LeadReference;
+    email?: LeadReference;
+    address?: LeadReference;
+  };
 }
 
 /** What the AI returns. Missing information is null, never invented. */

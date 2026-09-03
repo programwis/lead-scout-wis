@@ -2,8 +2,10 @@
 
 ไฟล์นี้ครอบคลุม **backend เท่านั้น** (โฟลเดอร์นี้) — path ทั้งหมดข้างล่างอ้างอิงจากโฟลเดอร์นี้
 
-ระบบหา lead ธุรกิจ: keyword → Serper → กรองเว็บ → Playwright crawl → Claude ดึงข้อมูลติดต่อ → MongoDB
-**เป้าหมายคือ contact ที่ Sales ติดต่อได้จริง ไม่ใช่แค่หาเว็บบริษัทเจอ** — บริษัทที่ไม่มีเบอร์และอีเมลไม่นับเป็นผลงาน
+ระบบหา lead ธุรกิจ: keyword + location → Google Maps (Serper) → ตรวจพื้นที่ → Playwright crawl เว็บทางการ
+→ Claude หาอีเมล → MongoDB
+**เป้าหมายคือ "ธุรกิจจริง ในพื้นที่ที่ขอ ที่ Sales ติดต่อได้"** ไม่ใช่ "ผลค้นหาที่มีคำค้นอยู่ในหน้า"
+ธุรกิจนอกพื้นที่ / ยืนยันพื้นที่ไม่ได้ / ไม่มีช่องทางติดต่อ **ไม่นับเป็นผลงานและไม่กินโควตา `limit`**
 คู่มือฉบับคนอ่าน (โฟลว์/ราคา/ตัวอย่าง API) อยู่ที่ `README.md` ข้าง ๆ กัน
 ผู้ใช้สื่อสารภาษาไทย — ตอบภาษาไทย
 
@@ -40,20 +42,37 @@ layer ที่ทำหน้าที่ forward call เฉย ๆ, โฟล
 | `routes/lead.routes.ts` | ผูก path กับ controller | logic |
 | `controllers/lead.controller.ts` | อ่าน body/query, validate, เรียก service | business logic |
 | `services/lead.service.ts` | คุมโฟลว์ generate / confirm / list | รายละเอียดของ Serper, Playwright, Claude |
-| `services/search.service.ts` | Serper เท่านั้น (รวมการแบ่งหน้า — รับ `page`, คืน `{ results, hasMore }`) | อย่างอื่น |
+| `services/search.service.ts` | Serper เท่านั้น · `searchPlaces()` = Google Maps (แหล่งของ "ธุรกิจ") · `searchWeb()` = Google Search (ใช้แค่ `/search`) | อย่างอื่น |
 | `services/crawler.service.ts` | Playwright เท่านั้น | DB, AI |
 | `services/ai.service.ts` | Claude เท่านั้น (structured output ด้วย Zod) | Fastify, DB |
 | `models/lead.model.ts` | Mongoose schema + index | crawl, AI, HTTP |
 | `types/*.type.ts` | type ที่ใช้ร่วมกัน (`progress.type.ts` = โครง progress ที่เตรียมไว้ ยังไม่มีใครใช้) | - |
-| `utils/{url,text}.utils.ts` | helper เล็ก ๆ | ทุกอย่างข้างบน |
+| `utils/url.utils.ts` | `classifySource()` บอกว่า URL เป็นแหล่งชนิดไหน + `normalizeUrl()` | blacklist (ดูกับดักข้อ 9) |
+| `utils/location.utils.ts` | `verifyLocation()` เทียบจังหวัดในที่อยู่กับที่ขอมา + รายชื่อ 77 จังหวัด | เรียก API, ถาม AI |
+| `utils/text.utils.ts` | helper เล็ก ๆ | ทุกอย่างข้างบน |
 
 ## โฟลว์ที่ต้องเข้าใจก่อนแก้ lead.service.ts
 
 - `generateLeads()` = **อ่าน DB อย่างเดียว** (เช็คว่า domain มีแล้วไหมเพื่อข้าม ไม่ให้เปลืองค่า AI) แล้วคืน `LeadCandidate[]` ที่ยังไม่บันทึก
-- **`limit` = จำนวน lead ที่ *ติดต่อได้* ไม่ใช่จำนวนเว็บที่หยิบจากผลค้นหา** — ระหว่างทางเว็บหล่นได้ 4 ทาง
-  (โดนกรองทิ้ง / domain มีใน DB แล้ว / crawl ไม่ผ่าน / หา contact ไม่เจอ) `generateLeads()` จึงวนขอ
-  Serper หน้าถัดไปมาเติมจนครบ `limit` หรือชน `maxSearchPages` (5 หน้า — hard limit ห้ามถอด)
-  `seenDomains` ต้องอยู่นอกลูปหน้า ไม่งั้น domain ที่โผล่ซ้ำในหน้าถัด ๆ ไปจะโดน crawl ซ้ำ
+- **ตัวธุรกิจมาจาก `searchPlaces()` (Google Maps) เท่านั้น ห้ามกลับไปใช้ผลค้นหาเว็บ** — ผลค้นหาเว็บคือ
+  "หน้าที่พูดถึงคำค้น" ไม่ใช่ "ตัวธุรกิจ" ของเดิมทำแบบนั้นแล้วได้กระทู้ Pantip เป็นชื่อบริษัท
+  และเว็บกรุงเทพหลุดเข้ามาในผลของขอนแก่น · `companyName` ต้องมาจาก `place.title` เท่านั้น
+  **ห้ามใส่ fallback ไปใช้ title ของผลค้นหา** นั่นคือต้นตอของบั๊กนั้นโดยตรง
+- **`location` เป็น hard constraint ตรวจที่ `verifyLocation()` ก่อน crawl** — `outside_location` ตัดทิ้งทันที
+  (ไม่เสียค่า AI) `unknown` ไปกอง `needsReview` ไม่นับ `limit` · ห้ามเปลี่ยนไปให้ AI ตัดสินพื้นที่
+  และห้ามยอมรับหลักฐานอ่อนอย่าง "หน้าเว็บพูดถึงจังหวัดนั้น" หรือ "คำค้นมีชื่อจังหวัด"
+- **`limit` = จำนวนธุรกิจที่ *อยู่ในพื้นที่และติดต่อได้*** — ระหว่างทางหล่นได้หลายทาง (นอกพื้นที่ /
+  ยืนยันพื้นที่ไม่ได้ / ไม่มีเว็บทางการ / domain ซ้ำ / มีใน DB แล้ว / crawl ไม่ผ่าน / ไม่มี contact)
+  จึงวนขอหน้าถัดไปมาเติมจนครบ หรือชน `maxSearchPages` (5 หน้า — hard limit ห้ามถอด)
+  **แต่หยุดก่อนถ้า 2 หน้าติดไม่ได้ lead ใหม่เลย** (`maxEmptyPages`) แล้วคืน `suggestion` บอกผู้ใช้
+  ห้ามแก้ให้ไล่จนครบเพดานเสมอเพื่อ "ให้ได้ครบจำนวน" — สเปกสั่งชัดว่าคืนน้อยแต่ดี ดีกว่าถมขยะ
+  `seenPlaces` (cid) กับ `seenDomains` ต้องอยู่นอกลูปหน้า ไม่งั้นธุรกิจซ้ำจะโดน crawl ซ้ำ
+- **`website` ต้องเป็นเว็บทางการเสมอ** ห้ามเอา Facebook / ข่าว / directory มาใส่แทน ของพวกนั้นไปอยู่
+  `references` ซึ่งเก็บจากลิงก์บนเว็บทางการที่ crawl มาแล้ว (ได้ฟรี ไม่ต้องเปิดหน้า social เพิ่ม
+  — Facebook บล็อกบอท crawl ไปก็เจอ login wall)
+- **เชื่อข้อมูลจาก Google Maps ก่อน AI เสมอ** ชื่อ/ที่อยู่/เบอร์/หมวดธุรกิจ ใช้ของ Maps
+  ของ AI ใช้เฉพาะช่องที่ Maps ไม่มี ซึ่งในทางปฏิบัติคืออีเมลเกือบทั้งหมด · `ai.service.ts`
+  **ไม่ได้ถูกแก้เลยในรอบนี้** เพราะ AI ไม่ได้ถูกถามเรื่องตัวตนหรือพื้นที่อีกต่อไป
 - **`contactStatus` backend คำนวณเอง ห้ามให้ AI ตอบ** — `contactable` (มีทั้งเบอร์และอีเมล) /
   `partial` (มีอย่างเดียว) / `no_contact` (ไม่มีเลย) เป็นเงื่อนไขตายตัว ถ้าให้ AI ตัดสินจะไม่คงเส้นคงวา
   เข้าโควตา `limit` เฉพาะ `contactable` + `partial` ส่วน `no_contact` ไปกอง `noContact` แยก
@@ -105,10 +124,21 @@ layer ที่ทำหน้าที่ forward call เฉย ๆ, โฟล
    ถูกตีเป็น `partial` ทั้งที่ไม่มีเบอร์ให้โทร `lead.service.ts` จึงล้างค่าก่อนคิด `contactStatus` ด้วย
    `phoneOrNull()` (ต้องมีตัวเลขและห้ามมี `@`) กับ `emailOrNull()` (ต้องมี `@` ตัด `mailto:` ทิ้ง)
    **อย่าเอาออก** ไม่งั้น `contactStatus` จะโกหก ซึ่งทำให้ `limit` นับผิดตามไปด้วย
-8. **ตัวกรอง `isBusinessWebsite()` กันขยะที่มากับการไล่หน้า** — พอบังคับให้ได้ครบ `limit` ระบบจะไล่ลงไป
-   หน้าลึก ๆ ที่มีแต่เว็บหางาน / บล็อกสำเร็จรูป / ราชการ ถ้าไม่กรองจะได้ครบจำนวนแต่เป็นขยะและเสียค่า AI ฟรี
-   (Blogspot คืน `your@email.com` ที่เป็น placeholder ของเทมเพลตมาแล้ว) เจอโดเมนขยะใหม่ให้เติมที่
-   `excludedDomains` / `excludedSuffixes` ใน `utils/url.utils.ts`
+8. **Serper `/places` คืนที่อยู่แบบตัดท้าย** — ไม่มีชื่อจังหวัด ("548 หมู่ 12 ถ. มิตรภาพ") ทำให้
+   `verifyLocation()` ตอบ `unknown` ทั้งที่ธุรกิจอยู่ในจังหวัดที่ขอจริง (วัดจริง: "สำนักงานใหญ่ ขอนแก่น"
+   `/places` ได้ unknown 10/10 · `/maps` ได้ verified 20/20) **ต้องใช้ `/maps` เท่านั้น**
+   และ `/maps` ยังให้ 20 รายต่อหน้าแทน 10
+9. **`/maps` ขอหน้า 2 ขึ้นไปต้องส่งพิกัด** ไม่งั้นได้ `400 Parameter "ll" ... is required for paginated
+   maps search` — `searchPlaces()` จึงคืน `cursor` (ค่า `ll` ที่ Serper ส่งมากับ response) ให้ผู้เรียก
+   ส่งกลับเข้ามาตอนขอหน้าถัดไป **อย่าถอด cursor ออกจากลูป** ไม่งั้นพังตั้งแต่หน้า 2
+10. **อย่ากลับไปทำ blacklist ของ domain** — เคยมี `excludedDomains`/`excludedSuffixes` แล้วพังสองทาง:
+   ไล่เติมไม่ทัน (pantip / dek-d / wikiwand หลุดตลอด) และเผลอตัดเป้าหมายทิ้ง (suffix `.ac.th`
+   ตัดโรงเรียนไทย**ทุกโรงเรียน** ตอนที่ keyword คือ "โรงเรียน" — ผลค้นหาหน้า 1 ตัด kkw.ac.th /
+   kkvs.ac.th / kkwl.ac.th ทิ้ง แล้วปล่อย pantip.com ผ่าน คือทำตรงข้ามกับที่ควรเป็นเป๊ะ ๆ)
+   `classifySource()` บอกแค่ว่า "หน้านี้ใช้เป็นอะไรได้" ไม่ได้ตัดสินว่าใครเป็น lead — ตัวธุรกิจมาจาก Maps
+11. **ธุรกิจที่ไม่มีเว็บทางการ = บันทึกไม่ได้** เพราะ `domain` มี unique index และ `confirmLeads()`
+   บังคับต้องมี จึงไปกอง `needsReview` เหตุ `no_website` (ทั้งที่มักมีเบอร์จาก Maps ให้โทรได้)
+   ถ้าจะรับพวกนี้เป็น lead ต้องแก้ schema ก่อน อย่าแก้ให้ `domain` เป็นค่าว่างแล้วบันทึก จะชนกันเอง
 
 ## วิธีตรวจงานเมื่อเครื่องไม่มี MongoDB
 
