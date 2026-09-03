@@ -1,5 +1,7 @@
 export interface Lead {
   companyName: string;
+  /** ค้นพบธุรกิจนี้มาจากแหล่งไหน */
+  sourceType?: LeadSourceType;
   /** ชื่อหมวดที่อิง keyword ที่ค้น — เหมือนกันทุกแถวที่มาจาก keyword เดียวกัน ใช้ filter */
   industry?: string;
   /** ประเภทธุรกิจตามที่ AI อ่านได้จากเว็บจริง — ข้อมูลดิบ ไม่ได้ใช้ filter */
@@ -10,6 +12,13 @@ export interface Lead {
   email?: string;
   address?: string;
 }
+
+/**
+ * ระบบค้นพบธุรกิจนี้มาจากแหล่งไหน — **คนละเรื่องกับ `SourceType` ข้างล่าง**
+ * ตัวนี้อยู่ระดับ lead (ค้นเจอจากไหน) ส่วน `SourceType` อยู่ระดับ URL (หน้านั้นเป็นแหล่งชนิดไหน)
+ * ตอนนี้มีทางเดียวคือ Google Maps ผ่าน Serper
+ */
+export type LeadSourceType = "google_maps";
 
 /**
  * บทบาทของหน้าเว็บหนึ่ง ๆ ต่อ lead — **ไม่ใช่ blacklist**
@@ -59,10 +68,17 @@ export type ContactStatus = "contactable" | "partial" | "no_contact";
  */
 export interface LeadCandidate {
   companyName: string;
+  /** ค้นพบมาจากไหน — ให้หน้าบ้าน/analytics รู้ที่มาโดยไม่ต้องเดาจาก references */
+  sourceType: LeadSourceType;
   industry: string;
   industryDetail: string | null;
-  website: string;
-  domain: string;
+  /**
+   * เว็บทางการของกิจการ — `null` ได้ ธุรกิจจำนวนมากใน Google Maps ไม่มีเว็บแต่มีเบอร์ให้โทร
+   * **ห้ามใช้การมีเว็บเป็นเงื่อนไขของการเป็น lead** ตัวตนธุรกิจมาจาก Google Maps อยู่แล้ว
+   * เว็บมีไว้ใช้ enrich (หาอีเมล/ลิงก์ social) เท่านั้น
+   */
+  website: string | null;
+  domain: string | null;
   phone: string | null;
   email: string | null;
   address: string | null;

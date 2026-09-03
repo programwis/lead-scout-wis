@@ -22,8 +22,11 @@ interface GenerateOptions {
   onProgress?: (progress: GenerateProgress) => void;
 }
 
-/** เหตุที่ธุรกิจไม่ได้เป็น lead ทั้งที่ Google Places รู้จัก */
-type ReviewReason = "unknown_location" | "no_website";
+/**
+ * เหตุที่ธุรกิจไม่ได้เป็น lead ทั้งที่ Google Maps รู้จัก
+ * เดิมมี `no_website` ด้วย — ถอดออกแล้วเพราะการไม่มีเว็บไม่ใช่เหตุให้ไม่เป็น lead
+ */
+type ReviewReason = "unknown_location";
 type RejectReason = "outside_location" | "duplicate_domain";
 
 /** สิ่งที่ควรทำต่อเมื่อได้ไม่ครบ — บอกผู้ใช้ดีกว่าเอาผลคุณภาพต่ำมาถมให้ครบจำนวน */
@@ -38,8 +41,13 @@ const maxSearchPages = 5;
 /** ไล่หน้าต่อได้อีกกี่หน้าเมื่อหน้านั้นไม่ได้ lead ใหม่เลย — เกินนี้ถือว่าคุณภาพตก หยุดดีกว่าถมขยะ */
 const maxEmptyPages = 2;
 
-/** จำนวน reference สูงสุดต่อ 1 lead — เว็บที่มีลิงก์ social เยอะ ๆ ไม่ควรทำให้ response บวม */
-const maxReferences = 8;
+/**
+ * เพดาน reference รายชนิด — reference ต้องตอบได้ว่า "กดแล้วช่วยติดต่อหรือยืนยันกิจการนี้ไหม"
+ * เว็บทางการกับหน้า Google Maps มีได้อย่างละ 1 อยู่แล้วโดยธรรมชาติ (มาจากตัวธุรกิจโดยตรง)
+ * ที่ต้องคุมคือของที่เก็บจากลิงก์บนหน้าเว็บ
+ */
+const maxSocialReferences = 5;
+const maxGovernmentReferences = 2;
 
 /**
  * ขั้นตอน search -> validate -> crawl -> extract เท่านั้น **ไม่บันทึกลง DB**
@@ -124,25 +132,31 @@ export async function generateLeads({
         continue;
       }
 
-      const website = place.website ? normalizeUrl(place.website) : null;
+      // Google Maps ใส่เพจ Facebook / หน้า directory ในช่อง website ได้ — นั่นไม่ใช่ "เว็บทางการ"
+      // และถ้าเอามาเป็น domain จะได้ `facebook.com` ซึ่งชน unique index กับทุกกิจการที่ทำแบบเดียวกัน
+      // (เหลือเป็น lead ได้แค่รายเดียวต่อทั้งฐาน) จึงเก็บเป็น website เฉพาะเว็บของกิจการเอง
+      // แต่ยัง crawl หน้านั้นเพื่อหาอีเมลเหมือนเดิม
+      const mapsWebsite = place.website ? normalizeUrl(place.website) : null;
+      const mapsWebsiteType = mapsWebsite ? classifySource(mapsWebsite) : null;
+      const website =
+        mapsWebsiteType === "official_website" || mapsWebsiteType === "government" ? mapsWebsite : null;
       const domain = website ? getDomain(website) : null;
 
-      // --- ไม่มีเว็บทางการ = ไม่มี domain ให้บันทึก (DB คีย์ด้วย domain) ---
-      if (!website || !domain) {
-        needsReview.push({ reason: "no_website", lead: buildLead(place, industry, null, null, locationStatus) });
-        continue;
+      // ไม่มีเว็บก็เป็น lead ได้ — ตัวตนธุรกิจมาจาก Google Maps ไม่ได้มาจากเว็บ
+      // เว็บเป็นแค่แหล่ง enrich (หาอีเมล/ลิงก์ social) กันซ้ำใช้ cid ที่เช็คไปแล้วข้างบน
+      if (domain) {
+        if (seenDomains.has(domain)) {
+          rejected.push({ reason: "duplicate_domain", companyName: place.title, address: place.address });
+          continue;
+        }
+        seenDomains.add(domain);
       }
-
-      if (seenDomains.has(domain)) {
-        rejected.push({ reason: "duplicate_domain", companyName: place.title, address: place.address });
-        continue;
-      }
-      seenDomains.add(domain);
 
       try {
-        // เช็คก่อน crawl เพื่อไม่ให้เสียค่า AI กับ domain ที่มีข้อมูลอยู่แล้ว
+        // เช็คก่อน crawl เพื่อไม่ให้เสียค่า AI กับธุรกิจที่มีข้อมูลอยู่แล้ว
+        // ไม่มี domain ก็ยังกันซ้ำได้ด้วยชื่อ+ที่อยู่ ซึ่งเป็นข้อมูลที่ lead มีอยู่แล้ว
         if (!refresh) {
-          const existing = await LeadModel.findOne({ domain });
+          const existing = await LeadModel.findOne(existingFilter(domain, place.title, place.address));
 
           if (existing) {
             skipped.push(existing);
@@ -151,23 +165,31 @@ export async function generateLeads({
         }
 
         // Places ให้ชื่อ/ที่อยู่/เบอร์มาแล้ว เข้าเว็บเพื่อหา "อีเมล" กับลิงก์ social เป็นหลัก
-        report("crawl", `กำลังอ่านเว็บ ${domain}`);
+        // ไม่มีเว็บ = ไม่ต้อง crawl ไม่ต้องเรียก AI (lead ยังใช้ได้ ถ้ามีเบอร์จาก Maps)
+        let fromSite;
 
-        const pages = await crawlSite(website);
+        if (mapsWebsite) {
+          report("crawl", `กำลังอ่านเว็บ ${getDomain(mapsWebsite) ?? mapsWebsite}`);
 
-        report("extract", `กำลังดึงข้อมูลติดต่อจาก ${domain}`);
+          const pages = await crawlSite(mapsWebsite);
 
-        const text = pages.map((crawled) => crawled.text).join("\n\n");
-        const links = pages.flatMap((crawled) => crawled.links);
-        const extracted = await extractLead(text, website, links, aiModel);
+          report("extract", `กำลังดึงข้อมูลติดต่อจาก ${place.title}`);
 
-        const lead = buildLead(place, industry, website, domain, locationStatus, {
-          email: extracted.email,
-          phone: extracted.phone,
-          address: extracted.address,
-          industryDetail: extracted.industry,
-          links
-        });
+          const text = pages.map((crawled) => crawled.text).join("\n\n");
+          const links = pages.flatMap((crawled) => crawled.links);
+          const extracted = await extractLead(text, mapsWebsite, links, aiModel);
+
+          fromSite = {
+            url: mapsWebsite,
+            email: extracted.email,
+            phone: extracted.phone,
+            address: extracted.address,
+            industryDetail: extracted.industry,
+            links
+          };
+        }
+
+        const lead = buildLead(place, industry, website, domain, locationStatus, fromSite);
 
         // ยืนยันพื้นที่ไม่ได้ = ยังไม่ถือว่าใช่ ไม่นับเข้าโควตา แต่คืนไปให้คนตัดสินเอง
         if (locationStatus === "unknown") {
@@ -178,7 +200,7 @@ export async function generateLeads({
         // ไม่มีทั้งเบอร์และอีเมล = Sales เอาไปติดต่อไม่ได้ จึงไม่นับเข้าโควตา limit
         (lead.contactStatus === "no_contact" ? noContact : leads).push(lead);
       } catch (error) {
-        failed.push({ url: website, message: (error as Error).message });
+        failed.push({ url: website ?? place.title, message: (error as Error).message });
       }
     }
 
@@ -230,6 +252,8 @@ function buildLead(
   domain: string | null,
   locationStatus: LeadCandidate["locationStatus"],
   fromSite?: {
+    /** URL ที่ crawl จริง — อาจไม่ใช่ `website` เช่นเพจ Facebook ที่ Google Maps ระบุไว้ */
+    url: string;
     email: string | null;
     phone: string | null;
     address: string | null;
@@ -237,54 +261,90 @@ function buildLead(
     links: string[];
   }
 ): LeadCandidate {
+  // หน้า Google Maps ของกิจการนี้โดยตรง (สร้างจาก cid ของมันเอง) — เป็น directory ได้แค่อันเดียว
   const mapsReference = place.cid
     ? { type: "directory" as const, url: `https://www.google.com/maps?cid=${place.cid}`, name: "Google Maps" }
     : null;
   const siteReference = website ? { type: "official_website" as const, url: website } : null;
+  // หน้าที่ crawl แต่ไม่ใช่เว็บทางการ (เพจ Facebook ที่ Maps ระบุไว้) — ยังเป็นแหล่งอ้างอิงที่ถูกต้อง
+  const crawledReference =
+    fromSite && fromSite.url !== website ? { type: classifySource(fromSite.url), url: fromSite.url } : null;
 
   const placePhone = phoneOrNull(place.phone);
   const phone = placePhone ?? phoneOrNull(fromSite?.phone ?? null);
   const email = emailOrNull(fromSite?.email ?? null);
   const address = place.address ?? fromSite?.address ?? null;
 
-  const references: LeadReference[] = [];
-
-  if (siteReference) references.push(siteReference);
-  if (mapsReference) references.push(mapsReference);
-  references.push(...socialReferences(fromSite?.links ?? [], domain, references));
+  // ลิงก์ที่อยู่บน "เว็บของกิจการเอง" = ช่องทางของกิจการ เก็บได้
+  // แต่ถ้าหน้าที่ crawl เป็นเพจ Facebook ลิงก์บนหน้านั้นคือเมนูของ Facebook เอง
+  // (login / recover / help / followers) ซึ่งกดไปแล้วไม่ช่วยติดต่อกิจการ จึงเก็บแค่ URL ของเพจนั้น
+  const references = collectReferences(
+    siteReference,
+    mapsReference,
+    crawledReference ? [crawledReference.url] : (fromSite?.links ?? []),
+    domain
+  );
 
   // แหล่งของแต่ละช่อง — Sales จะได้รู้ว่าเบอร์นี้มาจาก Google Maps หรือจากเว็บบริษัท
-  const phoneSource = placePhone ? mapsReference : siteReference;
+  const phoneSource = placePhone ? mapsReference : (siteReference ?? crawledReference);
   const contactSources: LeadCandidate["contactSources"] = {};
 
+  const emailSource = siteReference ?? crawledReference;
+
   if (phone && phoneSource) contactSources.phone = phoneSource;
-  if (email && siteReference) contactSources.email = siteReference;
+  if (email && emailSource) contactSources.email = emailSource;
   if (address && mapsReference) contactSources.address = mapsReference;
 
   return {
     companyName: place.title,
+    sourceType: "google_maps",
     industry,
     // หมวดจาก Google เป็นข้อมูลจริง ส่วนของ AI เป็นการตีความ จึงเอาของ Google ก่อน
     industryDetail: place.category ?? fromSite?.industryDetail ?? null,
-    website: website ?? "",
-    domain: domain ?? "",
+    website,
+    domain,
     phone,
     email,
     address,
     contactStatus: toContactStatus(phone, email),
     locationStatus,
-    references: references.slice(0, maxReferences),
+    references,
     contactSources
   };
 }
 
 /**
- * ลิงก์ social/directory ที่กิจการวางไว้บนเว็บตัวเอง = แหล่งอ้างอิงที่เชื่อได้ว่าเป็นของกิจการนั้นจริง
- * (ได้มาฟรีจากการ crawl ที่ทำอยู่แล้ว ไม่ต้องเปิดหน้า social เพิ่ม)
+ * เก็บเฉพาะแหล่งที่ **พิสูจน์ได้ว่าเป็นของกิจการนี้** — เกณฑ์คือ "Sales กดแล้วช่วยติดต่อ
+ * หรือยืนยันกิจการนี้ได้ไหม" ถ้าตอบไม่ได้ก็ไม่เก็บ ไม่ได้ใช้ blacklist แต่ใช้ความสัมพันธ์กับกิจการ
+ *
+ * - `official_website` 1 — เว็บที่ Google Maps ระบุว่าเป็นของกิจการนี้
+ * - `directory` 1 — หน้า Google Maps ของกิจการนี้ (สร้างจาก `cid` ของมันเอง)
+ *   **ไม่เก็บ directory จากลิงก์บนหน้าเว็บเลย** ซึ่งเป็นเหตุที่ Google Drive / Google Forms /
+ *   ลิงก์ redirect `google.com/url?q=` หายไปทั้งหมดโดยไม่ต้องไล่แบนทีละอัน
+ * - `social` สูงสุด 5 — ลิงก์โซเชียลที่กิจการวางไว้บนเว็บตัวเอง เชื่อได้ว่าเป็นเพจของมันเอง
+ * - `government` สูงสุด 2 — **ต้องอ้างถึงตัวกิจการเอง** (มีชื่อโดเมนของกิจการอยู่ใน URL)
+ *   เว็บโรงพยาบาลรัฐลิงก์หากันเองเป็นเรื่องปกติ ถ้าไม่เช็คตรงนี้ lead ของโรงพยาบาลหนึ่ง
+ *   จะได้ URL ของโรงพยาบาลอื่นติดมาเป็นพรืด ซึ่งไม่ช่วยติดต่อกิจการที่ Sales ถืออยู่เลย
+ *
+ * ชนิดอื่น (`news` / `reference` / `search` / `other`) ไม่เก็บ เพราะพิสูจน์ไม่ได้ว่าหน้านั้น
+ * พูดถึงกิจการนี้จริง — เป็นแค่ลิงก์ที่บังเอิญอยู่บนหน้าเดียวกัน
  */
-function socialReferences(links: string[], domain: string | null, existing: LeadReference[]) {
-  const seen = new Set(existing.map((reference) => reference.url));
+function collectReferences(
+  site: LeadReference | null,
+  maps: LeadReference | null,
+  links: string[],
+  domain: string | null
+) {
   const references: LeadReference[] = [];
+
+  if (site) references.push(site);
+  if (maps) references.push(maps);
+
+  const seen = new Set(references.map((reference) => reference.url.toLowerCase()));
+  // ส่วนแรกของโดเมน เช่น taksinhosp.go.th -> "taksinhosp" ใช้ดูว่า URL ราชการพูดถึงกิจการนี้ไหม
+  const label = domain?.split(".")[0]?.toLowerCase() ?? null;
+  let social = 0;
+  let government = 0;
 
   for (const link of links) {
     const linkDomain = getDomain(link);
@@ -295,17 +355,65 @@ function socialReferences(links: string[], domain: string | null, existing: Lead
 
     const type = classifySource(link);
 
-    if (type === "official_website" || type === "other") continue;
+    if (type === "social") {
+      if (social >= maxSocialReferences) continue;
+      // เพจโปรไฟล์กับโพสต์ในเพจนั้นคือแหล่งเดียวกัน — เก็บเฉพาะหน้าโปรไฟล์ที่กดแล้วเจอช่องทางติดต่อ
+      if (isDeepLinkOf(link, links)) continue;
+    } else if (type === "government") {
+      if (government >= maxGovernmentReferences) continue;
+      if (!label || !link.toLowerCase().includes(label)) continue;
+    } else {
+      continue;
+    }
 
-    const url = normalizeUrl(link);
+    const url = referenceUrl(link);
 
-    if (seen.has(url)) continue;
+    if (seen.has(url.toLowerCase())) continue;
 
-    seen.add(url);
+    seen.add(url.toLowerCase());
+    if (type === "social") social += 1;
+    else government += 1;
     references.push({ type, url });
   }
 
   return references;
+}
+
+/**
+ * `facebook.com/acme/posts/123` เป็นโพสต์ในเพจ `facebook.com/acme` ที่อยู่ในลิสต์เดียวกัน
+ * ทั้งคู่ชี้ไปที่กิจการเดียวกัน แต่หน้าโปรไฟล์คือหน้าที่มีช่องทางติดต่อ จึงทิ้งตัวที่ลึกกว่า
+ * เทียบเฉพาะ "เป็น path ย่อยของกันและกัน" เท่านั้น จึงไม่มีทางเลือกผิดตัวข้ามกิจการ
+ */
+function isDeepLinkOf(link: string, links: string[]) {
+  const self = pathKey(link);
+
+  if (!self) return false;
+
+  return links.some((other) => {
+    const key = pathKey(other);
+
+    return key !== null && key !== self && self.startsWith(`${key}/`);
+  });
+}
+
+/** host + path (ตัด query/hash) ไว้เทียบความเป็น path ย่อย — ไม่ได้เอาไปเก็บเป็น URL */
+function pathKey(link: string) {
+  try {
+    const { hostname, pathname } = new URL(link);
+
+    return `${hostname.toLowerCase()}${pathname.replace(/\/+$/, "")}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * เก็บ URL ให้กดแล้วไปถึงจริง — ต่างจาก `normalizeUrl()` ที่ **ตัด query ทิ้ง**
+ * ซึ่งใช้กับ reference ไม่ได้: `facebook.com/profile.php?id=100057...` จะเหลือ
+ * `facebook.com/profile.php` ที่เปิดแล้วไม่เจอเพจ และหน้า `.go.th` ที่ชี้ด้วย `?id=` ก็พังเหมือนกัน
+ */
+function referenceUrl(link: string) {
+  return link.trim().replace(/\/+$/, "");
 }
 
 /**
@@ -380,7 +488,19 @@ function summarize(
   };
 }
 
-/** บันทึกผลที่หน้าบ้านตรวจ/แก้แล้วลง DB ทีเดียว — upsert ตาม domain */
+/**
+ * กุญแจหาว่า "ธุรกิจนี้เคยเก็บไว้แล้วหรือยัง"
+ * มี domain → ใช้ domain (แม่นที่สุด และเป็นคีย์เดิมของ DB)
+ * ไม่มี domain → ใช้ชื่อ + ที่อยู่ ซึ่งเป็นข้อมูลที่ lead มีอยู่แล้ว ไม่ต้องเพิ่มฟิลด์ใหม่
+ *
+ * **ห้ามใช้ `{ domain: null }` เป็นตัวกรอง** เพราะจะไปแมตช์ lead ที่ไม่มี domain ทุกตัว
+ * แล้ว upsert เขียนทับกันเอง · คีย์ชื่อ+ที่อยู่อ่อนกว่า domain แต่พอสำหรับตอนนี้
+ */
+function existingFilter(domain: string | null, companyName: string, address: string | null) {
+  return domain ? { domain } : { companyName, address };
+}
+
+/** บันทึกผลที่หน้าบ้านตรวจ/แก้แล้วลง DB ทีเดียว — upsert ตาม domain (หรือชื่อ+ที่อยู่ถ้าไม่มีเว็บ) */
 export async function confirmLeads(candidates: LeadCandidate[]) {
   const saved = [];
   const failed = [];
@@ -389,18 +509,16 @@ export async function confirmLeads(candidates: LeadCandidate[]) {
     const domain = optional(candidate.domain) ?? getDomain(candidate.website ?? "");
     const companyName = optional(candidate.companyName);
 
-    if (!domain || !companyName) {
-      failed.push({
-        domain: candidate.domain ?? null,
-        message: "ต้องมี companyName และ domain (หรือ website ที่หา domain ได้)"
-      });
+    // เดิมบังคับต้องมี domain — ถอดออกแล้ว ธุรกิจจาก Google Maps ที่ไม่มีเว็บก็บันทึกได้
+    if (!companyName) {
+      failed.push({ domain: domain ?? null, message: "ต้องมี companyName" });
       continue;
     }
 
     try {
-      saved.push(await saveLead(domain, companyName, candidate));
+      saved.push(await saveLead(domain ?? null, companyName, candidate));
     } catch (error) {
-      failed.push({ domain, message: (error as Error).message });
+      failed.push({ domain: domain ?? null, message: (error as Error).message });
     }
   }
 
@@ -413,16 +531,19 @@ export async function listLeads(limit = 50, industry?: string) {
   return LeadModel.find(filter).sort({ createdAt: -1 }).limit(limit);
 }
 
-async function saveLead(domain: string, companyName: string, candidate: LeadCandidate) {
+async function saveLead(domain: string | null, companyName: string, candidate: LeadCandidate) {
+  const address = optional(candidate.address) ?? null;
+
   return LeadModel.findOneAndUpdate(
-    { domain },
+    existingFilter(domain, companyName, address),
     {
       // ช่องที่ส่งมาว่างจะถูกตัดออกจาก $set (mongoose ตัด undefined ให้)
       // แปลว่าเว้นว่าง = ไม่แก้ของเดิม ไม่ใช่ลบทิ้ง
       $set: {
-        domain,
+        // ไม่มีเว็บ = ต้อง "ไม่มีฟิลด์ domain" ไม่ใช่ null ไม่งั้น sparse unique index จะชนกันเอง
+        ...(domain ? { domain, website: optional(candidate.website) ?? normalizeUrl(`https://${domain}`) } : {}),
         companyName,
-        website: optional(candidate.website) ?? normalizeUrl(`https://${domain}`),
+        sourceType: candidate.sourceType,
         industry: optional(candidate.industry),
         industryDetail: optional(candidate.industryDetail),
         phone: optional(candidate.phone),
