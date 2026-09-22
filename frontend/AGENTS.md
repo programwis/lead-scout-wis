@@ -1787,10 +1787,10 @@ export const posts: typeof refPosts = { title: "Posts", empty: "No posts yet" };
 | Framework + version | Vite 6 + React 18 (SPA, ไม่มี SSR) | `package.json` |
 | ความต่างจาก framework รุ่นเก่าที่ต้องระวัง | ไม่มี App Router/route handler — ไม่มีแนวคิด Server Component | `package.json` |
 | Routing | `react-router-dom` v7 `createBrowserRouter` ที่ `src/router/index.tsx` — ไม่มี route group/segment พิเศษ | `src/router/index.tsx` |
-| Root layout | `src/components/layout/MainLayout.tsx` — page เรียกครอบเองต่อหน้า ไม่มี root layout กลาง | `src/components/layout/` |
+| Root layout | `src/components/layout/MainLayout.tsx` — **ครอบที่ router** (`router/index.tsx` ห่อ `element` ของแต่ละ route ด้วย `<MainLayout>`) ไม่ใช่ page component เรียกครอบตัวเอง — ไม่มี root layout กลางแบบ Next.js layout.tsx | `src/router/index.tsx` |
 | Data fetching | client hook เท่านั้น (ไม่มี RSC/Server Actions/React Query) | `src/pages/<route>/hooks/` |
-| ตำแหน่ง hook โหลดข้อมูล | `src/pages/<route>/hooks/useLoadInitialData.ts` — ใช้ชื่อนี้เป็นมาตรฐานทุกหน้า แม้บางหน้า hook นี้จะรวม mutation handler (generate/confirm) และ UI state (selection) ไว้ด้วย ไม่ใช่แค่โหลดข้อมูลตรงตัว (ตกลงกับผู้ใช้แล้วว่าไม่ต้องแยกฮุคย่อย) | `src/pages/leads/hooks/useLoadInitialData.ts` |
-| API architecture | ไม่มี API ในตัว (ไม่มี `app/api/`) — เรียก backend แยก (ดู `backend/README.md`/`backend/CLAUDE.md`) ผ่าน `src/services/<entity>.service.ts` | `src/services/` |
+| ตำแหน่ง hook โหลดข้อมูล | `src/pages/<route>/hooks/useLoadInitialData.ts` — **เฉพาะการโหลดข้อมูลตั้งต้นของหน้าเท่านั้น** (เช่น dropdown ตัวเลือก, ข้อมูลโชว์ตอนเปิดหน้าแรก) ห้ามใส่ mutation handler (generate/confirm/save) หรือ UI state (selection, editingRow) — พวกนั้นอยู่ใน `pages/<route>/index.tsx` โดยตรง เพื่อให้อ่านง่าย ไม่มีชั้นซ้อนเกินจำเป็น | `src/pages/leads/hooks/useLoadInitialData.ts`, `src/pages/leads/index.tsx` |
+| API architecture | ไม่มี API ในตัว (ไม่มี `app/api/`) — เรียก backend แยก (ดู `backend/README.md`/`backend/CLAUDE.md`) ผ่าน service object ต่อ entity ใน `src/services/<Entity>Service.ts` (เช่น `LeadService.generate()`, `LeadService.confirm()`) | `src/services/` |
 | Response envelope | ฝั่ง client เท่านั้น (backend กำหนด shape ของตัวเอง) — `AxiosUtil.createRequest<T>()` ใน `src/services/axios.ts` ครอบทุก call แล้วคืน `ApiResult<T>` = `{ ok: true; data: T } \| { ok: false; message: string }` เสมอ ไม่ throw · type อยู่ที่ `src/types/api.types.ts` | `src/services/axios.ts` |
 | Database + driver/ORM | ไม่มี (อยู่ฝั่ง backend) | — |
 | Validation library | ไม่มี (ไม่มี local API route ให้ validate) — ฟอร์มใช้ antd `Form` rules เป็น client-side UX check เท่านั้น ข้อมูลจริง validate ที่ backend | `src/pages/leads/SearchForm.tsx` |
@@ -1811,24 +1811,30 @@ export const posts: typeof refPosts = { title: "Posts", empty: "No posts yet" };
 | Deployment platform + cron | TODO — ยังไม่ระบุ | — |
 | Env vars ที่ต้องมี | `VITE_API_URL` | `.env.example` |
 | Branch หลัก · branch ทำงาน · รูปแบบ commit | main / develop · `type: summary` (`feat:`, `fix:`, `update:`) | `git log` |
-| ข้อยกเว้นจากกฎในเอกสารนี้ (พร้อมเหตุผล) | โครงสร้างด้านบน (ข้อ 2–13) เขียนไว้สำหรับ Next.js App Router — โปรเจกต์นี้ map เป็น React SPA ตามตารางนี้แทนทั้งหมด: ไม่มี `page.tsx`/`<Name>Client.tsx` split (ไม่มี Server Component ให้แยกจาก), ไม่มี `lib/db`/`schemas`/`lib/auth`, ไม่มี SEO metadata (internal tool), API service เรียกผ่าน `services/` + `AxiosUtil` แทน `lib/api/client.ts` แบบ fetch ตรง ๆ ตามคำขอผู้ใช้เมื่อ 2026-09-22 | บทสนทนากับผู้ใช้ |
+| ข้อยกเว้นจากกฎในเอกสารนี้ (พร้อมเหตุผล) | โครงสร้างด้านบน (ข้อ 2–13) เขียนไว้สำหรับ Next.js App Router — โปรเจกต์นี้ map เป็น React SPA ตามตารางนี้แทนทั้งหมด: ไม่มี `page.tsx`/`<Name>Client.tsx` split (ไม่มี Server Component ให้แยกจาก), ไม่มี `lib/db`/`schemas`/`lib/auth`, ไม่มี SEO metadata (internal tool) · **ต่างจากข้อ 2 ("หน้าเดียวและผูกกับ route นั้นเท่านั้น → colocate ข้าง page")**: โปรเจกต์นี้ให้ section component ของหน้าไปอยู่ `components/<feature>/` เสมอแม้ใช้แค่หน้าเดียว — `pages/<route>/` มีแค่ `index.tsx` + `hooks/useLoadInitialData.ts` (ตกลงกับผู้ใช้เมื่อ 2026-09-22) · **ต่างจากข้อ 5 (โครงมาตรฐาน `useLoadInitialData`)**: ในโปรเจกต์นี้ hook นี้โหลด "ข้อมูลตั้งต้นของหน้า" อย่างเดียวจริง ๆ — mutation handler (`handleGenerate`/`handleConfirm`/`handleSaveEdit`) และ state ที่เกี่ยวข้องทั้งหมดอยู่ใน `pages/<route>/index.tsx` โดยตรง ไม่ยกไปไว้ใน hook เพื่อลดชั้นซ้อนที่ไม่จำเป็น · **ต่างจากข้อ 6 (API/Service layer แบบ Next.js route handler)**: เรียก backend แยกผ่าน `services/axios.ts` (`AxiosUtil.createRequest<T>()` คืน `ApiResult<T>` เสมอ ไม่ throw) + service object ต่อ entity เช่น `services/LeadService.ts` (`LeadService.generate()`, `.confirm()`, `.getModels()`) แทน `lib/api/client.ts`/route handler แบบ Next.js · **root layout ครอบที่ `router/index.tsx`** (`<MainLayout><LeadsPage /></MainLayout>` ต่อ route) ไม่ใช่ page component ครอบตัวเอง — ทั้งหมดตกลงกับผู้ใช้เมื่อ 2026-09-22 ตามตัวอย่างมาตรฐานโปรเจกต์อื่นของผู้ใช้ (ProductPage/ProductService/GlobalLayout) | บทสนทนากับผู้ใช้ |
 
 ### โครงสร้างจริงของโปรเจกต์นี้ (React SPA)
 
 ```
 src/
 ├── router/index.tsx              ← createBrowserRouter ทั้งหมดของแอป
+│                                    ครอบแต่ละ route ด้วย <MainLayout> ตรงนี้ที่เดียว
+│                                    (ไม่ใช่ page component เรียกครอบตัวเอง)
 ├── pages/<route>/
-│   ├── <Name>Page.tsx            ← ประกอบหน้า เรียก hooks/useLoadInitialData ที่เดียว
-│   ├── <Section>.tsx             ← component ที่ผูกกับหน้านี้เท่านั้น (colocate)
-│   └── hooks/useLoadInitialData.ts
+│   ├── index.tsx                 ← ไฟล์เดียวของหน้า: ประกอบ section + เก็บ mutation
+│   │                                state/handler ทั้งหมดของหน้านี้ (generate/confirm/save ฯลฯ)
+│   │                                (component ภายในตั้งชื่อ <Name>Page เช่น LeadsPage)
+│   └── hooks/useLoadInitialData.ts  ← โหลดข้อมูลตั้งต้นของหน้าอย่างเดียว ไม่มี handler อื่น
 ├── components/
 │   ├── common/                   ← (ยังไม่มีไฟล์ในนี้ ณ ตอนนี้) UI กลางที่ใช้ ≥ 2 หน้า
 │   ├── layout/MainLayout.tsx     ← layout ของแอป
-│   └── <feature>/                ← component ผูกกับ entity (เช่น components/leads/)
+│   └── <feature>/                ← section/card/form ของ entity นั้น ๆ (เช่น components/leads/)
+│                                    — วางที่นี่แม้ใช้แค่หน้าเดียว ไม่ colocate ใน pages/<route>/
+│                                    (ตกลงกับผู้ใช้: pages/<route>/ มีแค่ index.tsx + hooks/)
 ├── services/
 │   ├── axios.ts                  ← axios instance + AxiosUtil.createRequest<T>() กลาง
-│   └── <entity>.service.ts       ← ฟังก์ชันเรียก API ต่อ entity คืน Promise<ApiResult<T>>
+│   └── <Entity>Service.ts        ← object รวมฟังก์ชันเรียก API ต่อ entity (PascalCase ตรงกับชื่อ
+│                                    object ที่ export เช่น LeadService) คืน Promise<ApiResult<T>>
 ├── types/
 │   ├── api.types.ts              ← ApiResult<T>
 │   └── <entity>.types.ts
