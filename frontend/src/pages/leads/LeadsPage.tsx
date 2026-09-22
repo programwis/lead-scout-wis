@@ -1,6 +1,6 @@
 import { Alert, Button, Card, Space, Typography } from "antd";
 import { CheckCircle } from "lucide-react";
-import MainLayout from "@/layouts/MainLayout";
+import MainLayout from "@/components/layout/MainLayout";
 import SearchForm from "./SearchForm";
 import GeneratingPanel from "./GeneratingPanel";
 import ResultsSummary from "./ResultsSummary";
@@ -8,7 +8,7 @@ import InsufficientResultsAlert from "./InsufficientResultsAlert";
 import LeadsTable from "./LeadsTable";
 import EditLeadDrawer from "./EditLeadDrawer";
 import SecondaryLeadsSections from "./SecondaryLeadsSections";
-import { useLeadsFlow } from "./useLeadsFlow";
+import { useLoadInitialData } from "./hooks/useLoadInitialData";
 
 const { Text } = Typography;
 
@@ -29,7 +29,7 @@ export default function LeadsPage() {
     handleGenerate,
     handleSaveEdit,
     handleConfirm,
-  } = useLeadsFlow();
+  } = useLoadInitialData();
 
   return (
     <MainLayout>

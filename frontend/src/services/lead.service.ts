@@ -1,4 +1,5 @@
-import { api } from "./api";
+import { AxiosUtil } from "./axios";
+import type { ApiResult } from "@/types/api.types";
 import type {
   ConfirmRequest,
   ConfirmResponse,
@@ -11,24 +12,31 @@ import type {
 /** /generate ทำ search + crawl + AI ตามลำดับแบบ synchronous จึงใช้เวลานาน ต้องเผื่อ timeout ยาว */
 const GENERATE_TIMEOUT_MS = 10 * 60 * 1000;
 
-export async function generateLeads(payload: GenerateRequest): Promise<GenerateResponse> {
-  const { data } = await api.post<GenerateResponse>("/api/leads/generate", payload, {
+export function generateLeads(payload: GenerateRequest): Promise<ApiResult<GenerateResponse>> {
+  return AxiosUtil.createRequest<GenerateResponse>({
+    method: "POST",
+    url: "/api/leads/generate",
+    data: payload,
     timeout: GENERATE_TIMEOUT_MS,
   });
-  return data;
 }
 
-export async function confirmLeads(payload: ConfirmRequest): Promise<ConfirmResponse> {
-  const { data } = await api.post<ConfirmResponse>("/api/leads/confirm", payload);
-  return data;
+export function confirmLeads(payload: ConfirmRequest): Promise<ApiResult<ConfirmResponse>> {
+  return AxiosUtil.createRequest<ConfirmResponse>({
+    method: "POST",
+    url: "/api/leads/confirm",
+    data: payload,
+  });
 }
 
-export async function getModels(): Promise<ModelsResponse> {
-  const { data } = await api.get<ModelsResponse>("/api/leads/models");
-  return data;
+export function getModels(): Promise<ApiResult<ModelsResponse>> {
+  return AxiosUtil.createRequest<ModelsResponse>({ method: "GET", url: "/api/leads/models" });
 }
 
-export async function getLeads(params?: { limit?: number; industry?: string }): Promise<Lead[]> {
-  const { data } = await api.get<{ success: true; leads: Lead[] }>("/api/leads", { params });
-  return data.leads;
+export function getLeads(params?: { limit?: number; industry?: string }): Promise<ApiResult<{ success: true; leads: Lead[] }>> {
+  return AxiosUtil.createRequest<{ success: true; leads: Lead[] }>({
+    method: "GET",
+    url: "/api/leads",
+    params,
+  });
 }

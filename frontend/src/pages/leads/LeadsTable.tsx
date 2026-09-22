@@ -1,7 +1,7 @@
 import { Button, Descriptions, Empty, Space, Table, Tag, Tooltip, Typography } from "antd";
 import type { TableProps } from "antd";
 import { Pencil, ExternalLink } from "lucide-react";
-import ContactStatusTag from "@/components/ContactStatusTag";
+import ContactStatusTag from "@/components/leads/ContactStatusTag";
 import type { EditableLeadRow, ReferenceType } from "@/types/lead.types";
 
 const { Text, Link } = Typography;

@@ -1777,40 +1777,64 @@ export const posts: typeof refPosts = { title: "Posts", empty: "No posts yet" };
 
 ## 27. Project-Specific Checklist (ต้องเติมทุกโปรเจกต์)
 
-<!-- TODO: AI MUST REVIEW THIS SECTION FOR EACH PROJECT -->
-
-AI ที่นำไฟล์นี้ไปใช้ต้องเติมตารางนี้จากการอ่าน repo จริง — ช่องที่ตอบไม่ได้ให้ **ถามผู้ใช้** ห้ามเดา
+> โปรเจกต์นี้คือ **Vite + React SPA** ไม่ใช่ Next.js — ส่วนของเอกสารนี้ที่ผูกกับ Next.js โดยเฉพาะ
+> (Server/Client Component split, `page.tsx`/`<Name>Client.tsx`, route handler, `generateMetadata`,
+> proxy/middleware auth, `server-only`, `next/image`) **ไม่ใช้กับโปรเจกต์นี้** — ดูคอลัมน์ "ค่าของโปรเจกต์นี้"
+> ด้านล่างสำหรับของจริงที่ใช้แทน
 
 | หัวข้อ | ค่าของโปรเจกต์นี้ | ที่มา (ไฟล์ที่ตรวจ) |
 |---|---|---|
-| Framework + version | TODO | `package.json` |
-| ความต่างจาก framework รุ่นเก่าที่ต้องระวัง | TODO | `node_modules/<framework>/docs` |
-| Routing (App/Pages Router · segment พิเศษ · route group) | TODO | `src/app/` |
-| Root layout อยู่ที่ไหน · มีหลาย root layout ไหม | TODO | |
-| Data fetching (client hook / RSC / Server Actions / React Query) | TODO | |
-| ตำแหน่ง hook โหลดข้อมูล | TODO | |
-| API architecture (REST route handler / tRPC / GraphQL / backend แยก) | TODO | |
-| Response envelope | TODO | `lib/api/` |
-| Database + driver/ORM | TODO | |
-| Validation library | TODO | `schemas/` |
-| Authentication (วิธี · ที่เก็บ session) | TODO | `lib/auth/` · proxy/middleware |
-| Authorization (role · ด่านตรวจ) | TODO | |
-| State management | TODO | |
-| Styling system + ไฟล์ token | TODO | |
-| UI library (ถ้ามี) + กฎการ lazy-load | TODO | |
-| Form library | TODO | |
-| i18n (มี/ไม่มี · ภาษาอ้างอิง) | TODO | |
-| Storage ไฟล์/รูป | TODO | |
-| Integration ภายนอก (email · payment · อื่น ๆ) | TODO | `lib/<integration>/` |
-| Testing framework | TODO | `package.json` |
-| คำสั่ง verify ที่มีจริง (lint · typecheck · build · test) | TODO | `package.json` scripts |
-| Formatter (Prettier ฯลฯ) | TODO | |
-| ภาษาของคอมเมนต์ / ข้อความ error / commit | TODO | |
-| Export style ของ component (default / named) | TODO | |
-| Deployment platform + cron | TODO | |
-| Env vars ที่ต้องมี (ชื่อเท่านั้น) | TODO | `.env.example` |
-| Branch หลัก · branch ทำงาน · รูปแบบ commit | TODO | `git log` |
-| ข้อยกเว้นจากกฎในเอกสารนี้ (พร้อมเหตุผล) | TODO | |
+| Framework + version | Vite 6 + React 18 (SPA, ไม่มี SSR) | `package.json` |
+| ความต่างจาก framework รุ่นเก่าที่ต้องระวัง | ไม่มี App Router/route handler — ไม่มีแนวคิด Server Component | `package.json` |
+| Routing | `react-router-dom` v7 `createBrowserRouter` ที่ `src/router/index.tsx` — ไม่มี route group/segment พิเศษ | `src/router/index.tsx` |
+| Root layout | `src/components/layout/MainLayout.tsx` — page เรียกครอบเองต่อหน้า ไม่มี root layout กลาง | `src/components/layout/` |
+| Data fetching | client hook เท่านั้น (ไม่มี RSC/Server Actions/React Query) | `src/pages/<route>/hooks/` |
+| ตำแหน่ง hook โหลดข้อมูล | `src/pages/<route>/hooks/useLoadInitialData.ts` — ใช้ชื่อนี้เป็นมาตรฐานทุกหน้า แม้บางหน้า hook นี้จะรวม mutation handler (generate/confirm) และ UI state (selection) ไว้ด้วย ไม่ใช่แค่โหลดข้อมูลตรงตัว (ตกลงกับผู้ใช้แล้วว่าไม่ต้องแยกฮุคย่อย) | `src/pages/leads/hooks/useLoadInitialData.ts` |
+| API architecture | ไม่มี API ในตัว (ไม่มี `app/api/`) — เรียก backend แยก (ดู `backend/README.md`/`backend/CLAUDE.md`) ผ่าน `src/services/<entity>.service.ts` | `src/services/` |
+| Response envelope | ฝั่ง client เท่านั้น (backend กำหนด shape ของตัวเอง) — `AxiosUtil.createRequest<T>()` ใน `src/services/axios.ts` ครอบทุก call แล้วคืน `ApiResult<T>` = `{ ok: true; data: T } \| { ok: false; message: string }` เสมอ ไม่ throw · type อยู่ที่ `src/types/api.types.ts` | `src/services/axios.ts` |
+| Database + driver/ORM | ไม่มี (อยู่ฝั่ง backend) | — |
+| Validation library | ไม่มี (ไม่มี local API route ให้ validate) — ฟอร์มใช้ antd `Form` rules เป็น client-side UX check เท่านั้น ข้อมูลจริง validate ที่ backend | `src/pages/leads/SearchForm.tsx` |
+| Authentication | ไม่มีระบบ login ในโปรเจกต์นี้ ณ ตอนนี้ | — |
+| Authorization | ไม่มี | — |
+| State management | React ล้วน — local state (`useState`) + page hook (`useLoadInitialData`) ต่อหน้า ไม่มี global state library | `src/pages/<route>/hooks/` |
+| Styling system | ไม่มี Tailwind — ใช้ antd component + inline `style` เป็นหลัก ไม่มีไฟล์ design token กลาง | `src/index.css`, antd |
+| UI library | antd v5 (ทั้งแอปเป็น "หลังบ้าน/เครื่องมือภายใน" จึงไม่ต้อง lazy-load แยกตาม public/admin) | `package.json` |
+| Form library | antd `Form` | `src/pages/leads/SearchForm.tsx` |
+| i18n | ไม่มี — ข้อความ UI เป็นภาษาไทย hardcode ในคอมโพเนนต์ | — |
+| Storage ไฟล์/รูป | ไม่มี | — |
+| Integration ภายนอก | ไม่มีในฝั่ง frontend (อยู่ฝั่ง backend) | — |
+| Testing framework | ไม่มี | `package.json` |
+| คำสั่ง verify ที่มีจริง | `npx tsc -b` (type check) · `npm run build` (type check + vite build) — **ไม่มี** `lint`/`test` script | `package.json` scripts |
+| Formatter | ไม่มี Prettier config | — |
+| ภาษาของคอมเมนต์ / ข้อความ error / commit | ไทย | โค้ดที่มีอยู่ |
+| Export style ของ component | `export default function ComponentName(...)` | โค้ดที่มีอยู่ |
+| Deployment platform + cron | TODO — ยังไม่ระบุ | — |
+| Env vars ที่ต้องมี | `VITE_API_URL` | `.env.example` |
+| Branch หลัก · branch ทำงาน · รูปแบบ commit | main / develop · `type: summary` (`feat:`, `fix:`, `update:`) | `git log` |
+| ข้อยกเว้นจากกฎในเอกสารนี้ (พร้อมเหตุผล) | โครงสร้างด้านบน (ข้อ 2–13) เขียนไว้สำหรับ Next.js App Router — โปรเจกต์นี้ map เป็น React SPA ตามตารางนี้แทนทั้งหมด: ไม่มี `page.tsx`/`<Name>Client.tsx` split (ไม่มี Server Component ให้แยกจาก), ไม่มี `lib/db`/`schemas`/`lib/auth`, ไม่มี SEO metadata (internal tool), API service เรียกผ่าน `services/` + `AxiosUtil` แทน `lib/api/client.ts` แบบ fetch ตรง ๆ ตามคำขอผู้ใช้เมื่อ 2026-09-22 | บทสนทนากับผู้ใช้ |
+
+### โครงสร้างจริงของโปรเจกต์นี้ (React SPA)
+
+```
+src/
+├── router/index.tsx              ← createBrowserRouter ทั้งหมดของแอป
+├── pages/<route>/
+│   ├── <Name>Page.tsx            ← ประกอบหน้า เรียก hooks/useLoadInitialData ที่เดียว
+│   ├── <Section>.tsx             ← component ที่ผูกกับหน้านี้เท่านั้น (colocate)
+│   └── hooks/useLoadInitialData.ts
+├── components/
+│   ├── common/                   ← (ยังไม่มีไฟล์ในนี้ ณ ตอนนี้) UI กลางที่ใช้ ≥ 2 หน้า
+│   ├── layout/MainLayout.tsx     ← layout ของแอป
+│   └── <feature>/                ← component ผูกกับ entity (เช่น components/leads/)
+├── services/
+│   ├── axios.ts                  ← axios instance + AxiosUtil.createRequest<T>() กลาง
+│   └── <entity>.service.ts       ← ฟังก์ชันเรียก API ต่อ entity คืน Promise<ApiResult<T>>
+├── types/
+│   ├── api.types.ts              ← ApiResult<T>
+│   └── <entity>.types.ts
+├── constants/                    ← ตัวเลือก static (industries, provinces, leadCount)
+└── utils/                        ← helper ที่ไม่ใช่ UI (เช่น apiError.ts → toFriendlyErrorMessage)
+```
 
 ---
 
